@@ -23,7 +23,7 @@ namespace FiresWayshrines
     {
         public const string PluginGUID = "com.Fire.FiresWayshrines";
         public const string PluginName = "FiresWayshrines";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.1.1";
 
         private const string BundleResourceName = "fireswayshrines";
 

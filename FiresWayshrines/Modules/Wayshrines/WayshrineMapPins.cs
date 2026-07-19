@@ -27,6 +27,11 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static readonly Dictionary<string, Minimap.PinData> _pinByShrineId
             = new Dictionary<string, Minimap.PinData>();
 
+        // World-entry summary box reads these: current pin total and how many
+        // full rebuilds have completed (lets the plugin wait for the first one).
+        public static int PinCount => _pinByShrineId.Count;
+        public static int CompletedRebuilds { get; private set; }
+
         /// <summary>
         /// Adds (or upgrades) a pin for a discovered live shrine. If a locked
         /// pin already exists for this id, it's replaced with a discovered one.
@@ -34,6 +39,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         public static void AddPinForShrine(Wayshrine shrine)
         {
             if (shrine == null || Minimap.instance == null) return;
+            if (shrine.GetAdminOnly() && !Wayshrine.IsLocalPlayerAdmin()) return; // admin-only: invisible to non-admins
             if (_pinByShrineId.TryGetValue(shrine.ShrineId, out var existing))
             {
                 if (existing != null && existing.m_type == DiscoveredPinType) return;
@@ -83,6 +89,8 @@ namespace VerdantsAscent.Modules.Wayshrines
             var player = Player.m_localPlayer;
             if (player == null) return;
 
+            if (shrine.GetAdminOnly() && !Wayshrine.IsLocalPlayerAdmin()) return; // admin-only: invisible to non-admins
+
             if (WayshrineDiscovery.HasDiscovered(player, shrine.ShrineId))
             {
                 AddPinForShrine(shrine);
@@ -111,9 +119,9 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// </summary>
         public static void RebuildPinsForLocalPlayer()
         {
-            // DIAG (login-freeze investigation): per-section ENTER/EXIT so the next
-            // repro log pinpoints which step is hung. Remove once the freeze is fixed.
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: ENTER (existing pins={_pinByShrineId.Count})");
+            // DIAG (login-freeze investigation): per-section ENTER/EXIT so a repro
+            // log pinpoints which step is hung. Verbose-gated via FiresLogger.
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: ENTER (existing pins={_pinByShrineId.Count})");
 
             // Clear all our previous pins from the map.
             if (Minimap.instance != null)
@@ -122,21 +130,22 @@ namespace VerdantsAscent.Modules.Wayshrines
                     if (kv.Value != null) Minimap.instance.RemovePin(kv.Value);
             }
             _pinByShrineId.Clear();
-            Debug.Log("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: cleared prior pins");
+            FiresLogger.LogVerbose("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: cleared prior pins");
 
             var player = Player.m_localPlayer;
             if (player == null || Minimap.instance == null)
             {
-                Debug.Log("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: bail — player or Minimap.instance null");
+                FiresLogger.LogVerbose("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: bail — player or Minimap.instance null");
                 return;
             }
 
             WayshrineWorldRegistry.PruneStaleDiscovery(player);
-            Debug.Log("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: PruneStaleDiscovery returned");
+            FiresLogger.LogVerbose("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: PruneStaleDiscovery returned");
 
             var discovered = WayshrineDiscovery.GetAllDiscovered(player);
             bool showLocked = WayshrineConfig.ShowUndiscoveredAsLocked?.Value ?? false;
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: discovered={discovered.Count}, showLocked={showLocked}");
+            bool isAdmin = Wayshrine.IsLocalPlayerAdmin();
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: discovered={discovered.Count}, showLocked={showLocked}");
 
             // Live shrines first — authoritative position + name.
             // Snapshot the registry first: a freshly-spawning shrine's Awake can call
@@ -145,12 +154,19 @@ namespace VerdantsAscent.Modules.Wayshrines
             // the underlying List<Wayshrine> mid-enumeration and throw
             // InvalidOperationException.
             var liveShrines = new List<Wayshrine>(WayshrineRegistry.All);
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: live-loop ENTER ({liveShrines.Count} live shrines)");
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: live-loop ENTER ({liveShrines.Count} live shrines)");
             var seen = new HashSet<string>();
             foreach (var shrine in liveShrines)
             {
                 if (shrine == null) continue;
-                if (discovered.Contains(shrine.ShrineId))
+
+                if (shrine.GetAdminOnly() && !isAdmin) { seen.Add(shrine.ShrineId); continue; } // hidden from non-admins
+
+                // Auto-discover shrines become known (and usable) the moment they're seen.
+                if (shrine.GetAutoDiscover() && !discovered.Contains(shrine.ShrineId))
+                    WayshrineDiscovery.MarkDiscovered(player, shrine.ShrineId, shrine.GetEpoch());
+
+                if (discovered.Contains(shrine.ShrineId) || shrine.GetAutoDiscover())
                 {
                     AddPinForShrine(shrine);
                     seen.Add(shrine.ShrineId);
@@ -161,15 +177,20 @@ namespace VerdantsAscent.Modules.Wayshrines
                     seen.Add(shrine.ShrineId);
                 }
             }
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: live-loop EXIT (pins so far={_pinByShrineId.Count})");
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: live-loop EXIT (pins so far={_pinByShrineId.Count})");
 
             // World-registry snapshot for shrines whose zone isn't loaded.
             var registryEntries = WayshrineWorldRegistry.GetAll();
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: registry-loop ENTER ({registryEntries.Count} entries)");
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: registry-loop ENTER ({registryEntries.Count} entries)");
             foreach (var entry in registryEntries)
             {
                 if (!seen.Add(entry.ShrineId)) continue;
-                if (discovered.Contains(entry.ShrineId))
+                if (entry.AdminOnly && !isAdmin) continue; // hidden from non-admins
+
+                if (entry.AutoDiscover && !discovered.Contains(entry.ShrineId))
+                    WayshrineDiscovery.MarkDiscovered(player, entry.ShrineId, entry.Epoch);
+
+                if (discovered.Contains(entry.ShrineId) || entry.AutoDiscover)
                 {
                     var pin = Minimap.instance.AddPin(
                         entry.Position, DiscoveredPinType, entry.DisplayName,
@@ -185,8 +206,9 @@ namespace VerdantsAscent.Modules.Wayshrines
                     AddLockedPin(entry.ShrineId, entry.Position);
                 }
             }
-            Debug.Log($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: registry-loop EXIT (total pins={_pinByShrineId.Count})");
-            Debug.Log("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: EXIT");
+            FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: registry-loop EXIT (total pins={_pinByShrineId.Count})");
+            CompletedRebuilds++;
+            FiresLogger.LogVerbose("[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: EXIT");
         }
 
         private static void AddLockedPin(string shrineId, Vector3 pos)

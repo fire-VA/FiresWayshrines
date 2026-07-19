@@ -25,8 +25,8 @@ namespace VerdantsAscent.Modules.Wayshrines
     public static class WayshrineWorldRegistry
     {
         // List of wayshrine prefab names to scan for. Future biome variants
-        // (Wayshrine_blackforest etc.) just need to be appended here.
-        private static readonly string[] PrefabNames = { "Wayshrine_meadows" };
+        // just need to be appended here.
+        private static readonly string[] PrefabNames = { "Wayshrine_meadows", "Wayshrine_StoneTemple", "Wayshrine_StonePagoda", "Wayshrine_Trigger" };
 
         public struct Entry
         {
@@ -36,6 +36,12 @@ namespace VerdantsAscent.Modules.Wayshrines
             public Quaternion Rotation;
             public string DisplayName; // resolved from Piece.m_name override (or legacy key)
             public string ShrineId;    // matches WayshrineDiscovery.MakeShrineId(prefabName, position)
+
+            // Admin per-shrine settings, carried so unloaded shrines on dedicated clients still honor them.
+            public int Epoch;          // discovery-wipe version (Wayshrine.ZdoDiscoveryEpoch)
+            public bool AutoDiscover;  // pinned + usable on first login
+            public bool AdminOnly;     // only visible/usable by admins
+            public float Cooldown;     // per-player cooldown seconds for using this shrine as a destination
         }
 
         private static readonly List<Entry> _cache = new List<Entry>();
@@ -135,12 +141,16 @@ namespace VerdantsAscent.Modules.Wayshrines
 
                     _cache.Add(new Entry
                     {
-                        Id          = zdo.m_uid,
-                        PrefabName  = prefabName,
-                        Position    = pos,
-                        Rotation    = rot,
-                        DisplayName = name,
-                        ShrineId    = WayshrineDiscovery.MakeShrineId(prefabName, pos),
+                        Id           = zdo.m_uid,
+                        PrefabName   = prefabName,
+                        Position     = pos,
+                        Rotation     = rot,
+                        DisplayName  = name,
+                        ShrineId     = WayshrineDiscovery.MakeShrineId(prefabName, pos),
+                        Epoch        = zdo.GetInt(Wayshrine.ZdoDiscoveryEpoch, 0),
+                        AutoDiscover = zdo.GetBool(Wayshrine.ZdoAutoDiscover, false),
+                        AdminOnly    = zdo.GetBool(Wayshrine.ZdoAdminOnly, false),
+                        Cooldown     = zdo.GetFloat(Wayshrine.ZdoCooldownSeconds, 0f),
                     });
                 }
             }

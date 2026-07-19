@@ -29,13 +29,20 @@ namespace VerdantsAscent.Modules.Wayshrines
         // --- Map UI ---
         public static ConfigEntry<bool> ShowUndiscoveredAsLocked;
 
+        // --- Logging ---
+        public static ConfigEntry<bool> VerboseLogging;
+
         public static void Bind(ConfigFile cfg)
         {
+            const string SEC_GENERAL = "General";
             const string SEC_DISCO = "Wayshrines.Discovery";
             const string SEC_COST = "Wayshrines.Cost";
             const string SEC_COOLDOWN = "Wayshrines.Cooldown";
             const string SEC_RULES = "Wayshrines.Rules";
             const string SEC_MAP = "Wayshrines.Map";
+
+            VerboseLogging = cfg.Bind(SEC_GENERAL, "Verbose Logging", false,
+                "Enable verbose diagnostic logging (sync/pin-rebuild/registration traces).");
 
             DiscoveryRange = cfg.Bind(SEC_DISCO, "DiscoveryRange", 20f,
                 "Distance (in meters) at which a player automatically discovers a wayshrine they walk near.");

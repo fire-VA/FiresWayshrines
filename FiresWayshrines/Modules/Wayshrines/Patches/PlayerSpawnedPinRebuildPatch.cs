@@ -26,8 +26,8 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         {
             if (__instance != Player.m_localPlayer) return;
 
-            // DIAG (login-freeze)
-            Debug.Log("[LoginFreeze][DIAG] ENTER PlayerSpawnedPinRebuildPatch.Postfix");
+            // DIAG (login-freeze) — verbose-gated via FiresLogger.
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] ENTER PlayerSpawnedPinRebuildPatch.Postfix");
 
             // Defer one frame so Minimap.instance + ZRoutedRpc.instance are
             // guaranteed to be live. The sync flow is host-fast / client-async
@@ -39,8 +39,8 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
             // PlayerSpawnGate callbacks are what actually localise the freeze.
             __instance.StartCoroutine(LoginFreezeHeartbeat());
 
-            // DIAG (login-freeze)
-            Debug.Log("[LoginFreeze][DIAG] EXIT PlayerSpawnedPinRebuildPatch.Postfix");
+            // DIAG (login-freeze) — verbose-gated via FiresLogger.
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] EXIT PlayerSpawnedPinRebuildPatch.Postfix");
         }
 
         private static System.Collections.IEnumerator KickOffSyncNextFrame()
@@ -55,13 +55,13 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
             // The real diagnostic value is in the ENTER/EXIT logs on each Player.OnSpawned
             // postfix and PlayerSpawnGate.InvokeWork — those tell us WHICH call is hung.
             // The heartbeat just bounds whether we got past 1s/5s at all.
-            Debug.Log("[LoginFreeze][DIAG] heartbeat START (Player.OnSpawned postfix)");
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat START (Player.OnSpawned postfix)");
             yield return new WaitForSecondsRealtime(1f);
-            Debug.Log("[LoginFreeze][DIAG] heartbeat +1s — main thread alive");
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat +1s — main thread alive");
             yield return new WaitForSecondsRealtime(4f);
-            Debug.Log("[LoginFreeze][DIAG] heartbeat +5s — main thread alive");
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat +5s — main thread alive");
             yield return new WaitForSecondsRealtime(25f);
-            Debug.Log("[LoginFreeze][DIAG] heartbeat +30s — main thread alive (diagnostic window closing)");
+            FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat +30s — main thread alive (diagnostic window closing)");
         }
     }
 

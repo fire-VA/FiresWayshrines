@@ -110,6 +110,7 @@
   <ItemGroup>
     <Compile Include="Ascend.cs" />
     <Compile Include="Modules\Wayshrines\Wayshrine.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrineAdminContext.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineConfig.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineCostCalculator.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineDiscovery.cs" />
@@ -121,7 +122,11 @@
     <Compile Include="Modules\Wayshrines\WayshrineRegistry.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineSyncRPC.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTeleportFlow.cs" />
+    <Compile Include="Modules\Wayshrines\TeleporterHubConfig.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrinesApi.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTeleportPopup.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrineTriggerScaling.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrineTriggerWire.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineWorldRegistry.cs" />
     <Compile Include="Modules\Wayshrines\Patches\MinimapClickPatch.cs" />
     <Compile Include="Modules\Wayshrines\Patches\PlayerSpawnedPinRebuildPatch.cs" />
@@ -129,6 +134,8 @@
     <Compile Include="Modules\Wayshrines\Patches\WayshrineDestructionPatch.cs" />
     <Compile Include="Modules\Wayshrines\TownPortalScroll\TownPortalScrollHandler.cs" />
     <Compile Include="Modules\Wayshrines\TownPortalScroll\TownPortalScrollRecipe.cs" />
+    <Compile Include="Utilities\FiresLogger.cs" />
+    <Compile Include="Utilities\FiresWayshrinesBanner.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -137,10 +144,15 @@
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <BlueHillsPluginDir>C:\Users\travi\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\BlueHills\BepInEx\plugins\FiresWayshrines\</BlueHillsPluginDir>
+    <BlueHillsDediDir>C:\Program Files (x86)\Steam\steamapps\common\Valheim dedicated server - BlueHills\BepInEx\plugins\FiresWayshrines\</BlueHillsDediDir>
   </PropertyGroup>
   <Target Name="DeployToBlueHills" AfterTargets="Build" Condition="Exists('$(BlueHillsPluginDir)')">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BlueHillsPluginDir)" OverwriteReadOnlyFiles="true" />
     <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(BlueHillsPluginDir)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
     <Message Importance="high" Text="Deployed $(TargetFileName) (+pdb) -&gt; $(BlueHillsPluginDir)" />
+  </Target>
+  <Target Name="DeployToBlueHillsDedi" AfterTargets="Build" Condition="Exists('$(BlueHillsDediDir)')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BlueHillsDediDir)" OverwriteReadOnlyFiles="true" />
+    <Message Importance="high" Text="Deployed $(TargetFileName) -&gt; $(BlueHillsDediDir)" />
   </Target>
 </Project>

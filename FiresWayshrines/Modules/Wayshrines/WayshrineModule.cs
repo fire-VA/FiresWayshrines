@@ -69,7 +69,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (!FiresWayshrinesPlugin.piecePrefabs.Contains(prefab))
                 FiresWayshrinesPlugin.piecePrefabs.Add(prefab);
 
-            FiresLogger.LogInfo($"[Wayshrine] Attached Wayshrine component to '{prefab.name}'.");
+            FiresLogger.LogVerbose($"[Wayshrine] Attached Wayshrine component to '{prefab.name}'.");
             return true;
         }
 

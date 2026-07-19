@@ -31,9 +31,12 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// Marks the shrine as discovered for this player. Returns true if it
         /// was newly added (false if already known).
         /// </summary>
-        public static bool MarkDiscovered(Player player, string shrineId)
+        public static bool MarkDiscovered(Player player, string shrineId, int epoch = 0)
         {
             if (player == null || string.IsNullOrEmpty(shrineId)) return false;
+            // Always stamp the epoch we discovered it at, so a later wipe (which bumps the shrine's epoch)
+            // can tell this discovery is stale.
+            SetDiscoveredEpoch(player, shrineId, epoch);
             var set = ReadDiscoveredSet(player);
             if (set.Contains(shrineId)) return false;
             set.Add(shrineId);
@@ -147,6 +150,74 @@ namespace VerdantsAscent.Modules.Wayshrines
                 sb.Append(list[i].ToString("F1", CultureInfo.InvariantCulture));
             }
             player.m_customData[KEY_COOLDOWN_TIMESTAMPS] = sb.ToString();
+        }
+
+        // ---------------- Per-shrine discovered-epoch (wipe support) ----------------
+
+        private const string KEY_DISCOVERED_EPOCHS = "WayshrinesDiscoveredEpochs"; // "shrineId=epoch" pairs
+
+        /// <summary>Epoch at which the player discovered this shrine; -1 if not recorded.</summary>
+        public static int GetDiscoveredEpoch(Player player, string shrineId)
+        {
+            var map = ReadPairMap(player, KEY_DISCOVERED_EPOCHS);
+            return map.TryGetValue(shrineId, out var raw) && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var e) ? e : -1;
+        }
+
+        public static void SetDiscoveredEpoch(Player player, string shrineId, int epoch)
+        {
+            if (player?.m_customData == null || string.IsNullOrEmpty(shrineId)) return;
+            var map = ReadPairMap(player, KEY_DISCOVERED_EPOCHS);
+            map[shrineId] = epoch.ToString(CultureInfo.InvariantCulture);
+            WritePairMap(player, KEY_DISCOVERED_EPOCHS, map);
+        }
+
+        // ---------------- Per-shrine, per-player last-use (cooldown) ----------------
+
+        private const string KEY_LAST_USE = "WayshrineLastUse"; // "shrineId=unixSeconds" pairs
+
+        public static double GetLastUse(Player player, string shrineId)
+        {
+            var map = ReadPairMap(player, KEY_LAST_USE);
+            return map.TryGetValue(shrineId, out var raw) && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var t) ? t : 0d;
+        }
+
+        public static void SetLastUse(Player player, string shrineId, double nowSeconds)
+        {
+            if (player?.m_customData == null || string.IsNullOrEmpty(shrineId)) return;
+            var map = ReadPairMap(player, KEY_LAST_USE);
+            map[shrineId] = nowSeconds.ToString("F0", CultureInfo.InvariantCulture);
+            WritePairMap(player, KEY_LAST_USE, map);
+        }
+
+        // ---------------- shared "key=value;key=value" customData map helpers ----------------
+
+        private static Dictionary<string, string> ReadPairMap(Player player, string customDataKey)
+        {
+            var map = new Dictionary<string, string>();
+            if (player?.m_customData == null) return map;
+            if (!player.m_customData.TryGetValue(customDataKey, out var raw) || string.IsNullOrEmpty(raw)) return map;
+            foreach (var pair in raw.Split(';'))
+            {
+                int eq = pair.LastIndexOf('=');
+                if (eq <= 0) continue;
+                map[pair.Substring(0, eq)] = pair.Substring(eq + 1);
+            }
+            return map;
+        }
+
+        private static void WritePairMap(Player player, string customDataKey, Dictionary<string, string> map)
+        {
+            if (player?.m_customData == null) return;
+            if (map.Count == 0) { player.m_customData.Remove(customDataKey); return; }
+            var sb = new StringBuilder(map.Count * 24);
+            bool first = true;
+            foreach (var kv in map)
+            {
+                if (!first) sb.Append(';');
+                sb.Append(kv.Key).Append('=').Append(kv.Value);
+                first = false;
+            }
+            player.m_customData[customDataKey] = sb.ToString();
         }
 
         // ---------------- Shrine ID helper ----------------

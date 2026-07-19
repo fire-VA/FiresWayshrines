@@ -78,13 +78,18 @@ namespace VerdantsAscent.Modules.Wayshrines
             WayshrineRegistry.Register(this);
             WayshrineWorldRegistry.Invalidate();
 
+            // Per-shrine auto-discover (admin flag): known the moment it streams in, so it's pinned +
+            // usable without walking up to it (covers first-login too).
+            if (GetAutoDiscover() && Player.m_localPlayer != null)
+                WayshrineDiscovery.MarkDiscovered(Player.m_localPlayer, ShrineId, GetEpoch());
+
             // Drop a map pin for this shrine immediately. If the local player
             // has already discovered it, drop a labeled pin; otherwise (and
             // only when the config is enabled) drop a locked "???" pin so
             // they can see something is here without revealing the name.
             WayshrineMapPins.AddPinForShrineRespectingDiscovery(this);
 
-            FiresLogger.LogInfo($"[Wayshrine] Registered shrine '{DisplayName}' id='{ShrineId}' pos={transform.position} liveCount={WayshrineRegistry.All.Count}");
+            FiresLogger.LogVerbose($"[Wayshrine] Registered shrine '{DisplayName}' id='{ShrineId}' pos={transform.position} liveCount={WayshrineRegistry.All.Count}");
         }
 
         private void OnDestroy()
@@ -108,7 +113,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             d.y = 0f;
             if (d.sqrMagnitude > range * range) return;
 
-            if (WayshrineDiscovery.MarkDiscovered(player, ShrineId))
+            if (WayshrineDiscovery.MarkDiscovered(player, ShrineId, GetEpoch()))
             {
                 MessageHud.instance?.ShowMessage(MessageHud.MessageType.Center, $"Discovered: {DisplayName}");
                 WayshrineMapPins.AddPinForShrine(this);
@@ -183,6 +188,55 @@ namespace VerdantsAscent.Modules.Wayshrines
             zdo.Set("Piece.m_name", newName);
         }
 
+        // ---------------- Admin per-shrine settings (ZDO-backed; replicate via vanilla ZDO networking) ----------------
+
+        public const string ZdoCostOverride    = "VAWayshrine_costOverride";    // int coins; <0 = use cost calc
+        public const string ZdoCooldownSeconds = "VAWayshrine_cooldownSeconds"; // float; 0 = no cooldown
+        public const string ZdoAutoDiscover    = "VAWayshrine_autoDiscover";    // bool
+        public const string ZdoAdminOnly       = "VAWayshrine_adminOnly";       // bool
+        public const string ZdoDiscoveryEpoch  = "VAWayshrine_epoch";           // int; bumped on map-marker wipe
+
+        private ZDO Zdo => (_nview != null && _nview.IsValid()) ? _nview.GetZDO() : null;
+
+        public bool TryGetCostOverride(out int coins)
+        {
+            coins = 0;
+            var z = Zdo; if (z == null) return false;
+            int v = z.GetInt(ZdoCostOverride, -1);
+            if (v < 0) return false;
+            coins = v; return true;
+        }
+
+        public float GetCooldownSeconds() { var z = Zdo; return z == null ? 0f : z.GetFloat(ZdoCooldownSeconds, 0f); }
+        public bool GetAutoDiscover()      { var z = Zdo; return z != null && z.GetBool(ZdoAutoDiscover, false); }
+        public bool GetAdminOnly()         { var z = Zdo; return z != null && z.GetBool(ZdoAdminOnly, false); }
+        public int  GetEpoch()             { var z = Zdo; return z == null ? 0 : z.GetInt(ZdoDiscoveryEpoch, 0); }
+
+        public void SetCostOverride(int coins)   => WriteOwned(z => z.Set(ZdoCostOverride, Mathf.Max(0, coins)));
+        public void ClearCostOverride()          => WriteOwned(z => z.Set(ZdoCostOverride, -1));
+        public void SetCooldownSeconds(float s)  => WriteOwned(z => z.Set(ZdoCooldownSeconds, Mathf.Max(0f, s)));
+        public void SetAutoDiscover(bool on)     => WriteOwned(z => z.Set(ZdoAutoDiscover, on));
+        public void SetAdminOnly(bool on)        => WriteOwned(z => z.Set(ZdoAdminOnly, on));
+
+        /// <summary>Server/host: bump the discovery epoch so every client resets its marker for this shrine
+        /// (online clients via the wipe broadcast, offline clients via the login epoch-compare).</summary>
+        public int BumpEpoch()
+        {
+            int next = GetEpoch() + 1;
+            WriteOwned(z => z.Set(ZdoDiscoveryEpoch, next));
+            return next;
+        }
+
+        private void WriteOwned(System.Action<ZDO> write)
+        {
+            if (_nview == null || !_nview.IsValid()) return;
+            _nview.ClaimOwnership();
+            var z = _nview.GetZDO();
+            if (z == null) return;
+            write(z);
+            WayshrineWorldRegistry.Invalidate();   // host rescan picks the change into the cached Entry
+        }
+
         /// <summary>
         /// Admin rename. Claims ownership, writes the field override (which
         /// syncs to other clients via ZDO; their <see cref="Piece.m_name"/>
@@ -212,13 +266,16 @@ namespace VerdantsAscent.Modules.Wayshrines
 
         public string GetHoverText()
         {
+            // Admin-only shrines show NO interaction prompt to non-admins (the map pin is hidden too).
+            if (GetAdminOnly() && !IsLocalPlayerAdmin()) return "";
+
             string name = DisplayName;
             string useKey = "$KEY_Use";
             if (Localization.instance != null) useKey = Localization.instance.Localize(useKey);
 
             string line = $"<color=#FFD966>{name}</color>\n[<color=yellow><b>{useKey}</b></color>] Activate Wayshrine";
             if (IsLocalPlayerAdmin())
-                line += "\n<size=80%><color=#888>Admin: alt + right-click pin on map to rename</color></size>";
+                line += "\n<size=80%><color=#888>Admin: hold Alt + right-click for shrine options</color></size>";
             return line;
         }
 
@@ -231,7 +288,15 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (hold) return false;
             if (user as Player != Player.m_localPlayer) return false;
 
-            WayshrineDiscovery.MarkDiscovered(Player.m_localPlayer, ShrineId);
+            // Admin-only shrines can't be activated (teleported FROM) by non-admins. The pin is already
+            // hidden from them; this stops walking up to the physical piece and using it.
+            if (GetAdminOnly() && !IsLocalPlayerAdmin())
+            {
+                Player.m_localPlayer?.Message(MessageHud.MessageType.Center, "This wayshrine is restricted to admins.");
+                return true;
+            }
+
+            WayshrineDiscovery.MarkDiscovered(Player.m_localPlayer, ShrineId, GetEpoch());
             WayshrineMapPins.AddPinForShrine(this);
             WayshrineTeleportFlow.BeginFromShrine(this);
             return true;
@@ -286,25 +351,18 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// <summary>
         /// Local-player admin check that works on dedicated servers.
         ///
-        /// Vanilla <see cref="ZNet.LocalPlayerIsAdminOrHost"/> reads the
-        /// server-only <c>m_adminList</c>. On a dedicated client that list
-        /// is empty even when the player IS a real admin, so the vanilla
-        /// check returns false and every admin-only branch (the hover hint
-        /// here, the alt+RMB rename in <c>MinimapClickPatch</c>, the SetText
-        /// guard above) silently no-ops.
-        ///
-        /// <see cref="ConfigSync.IsAdmin"/> covers both topologies: on the
-        /// host it's true via <c>isSourceOfTruth</c>; on a dedicated client
-        /// it flips to true once <see cref="AdminSyncing"/> has pushed the
-        /// admin-status RPC and set <c>lockExempt</c>. Same pattern that
-        /// <c>EnvironmentBoxController.IsLocalPlayerAdmin</c> and
-        /// <c>NpcController</c> already use for the same reason.
+        /// Gates on CORE's ConfigSync, NOT our own. <c>ConfigSync.IsAdmin</c> is
+        /// <c>lockExempt || isSourceOfTruth</c>; <c>isSourceOfTruth</c> defaults
+        /// to true and only flips false once a client RECEIVES a config sync.
+        /// Our own ConfigSync syncs nothing, so its <c>isSourceOfTruth</c> stays
+        /// true on every dedicated client — making our <c>IsAdmin</c> return true
+        /// for EVERYONE (the bug: non-admins saw the admin hint/menu and admin-only
+        /// shrines). Core's ConfigSync registers real synced/locking config, so its
+        /// <c>isSourceOfTruth</c> flips correctly, and admin status (<c>lockExempt</c>,
+        /// a static field) is pushed family-wide by Core's <c>AdminSyncing</c>.
+        /// Now delegates to the ONE canonical family check, <c>FiresCore.Sync.AdminSyncing.IsLocalAdmin</c>
+        /// (IsServer + LocalPlayerIsAdminOrHost + lockExempt union), instead of this mod's own combination.
         /// </summary>
-        internal static bool IsLocalPlayerAdmin()
-        {
-            if (ZNet.instance?.IsServer() == true) return true;
-            if (FiresWayshrinesPlugin.Instance?.configSync?.IsAdmin == true) return true;
-            return false;
-        }
+        internal static bool IsLocalPlayerAdmin() => FiresCore.Sync.AdminSyncing.IsLocalAdmin();
     }
 }

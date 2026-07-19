@@ -81,10 +81,21 @@ namespace VerdantsAscent.Modules.Wayshrines
                 live[w.ShrineId] = w;
             }
 
+            bool isAdmin = Wayshrine.IsLocalPlayerAdmin();
+
             for (int i = 0; i < world.Count; i++)
             {
                 var entry = world[i];
                 if (!WayshrineDiscovery.HasDiscovered(player, entry.ShrineId)) continue;
+
+                // Admin-only shrines are not valid teleport targets (to OR from) for non-admins.
+                if (!isAdmin)
+                {
+                    bool adminOnly = live.TryGetValue(entry.ShrineId, out var lw) && lw != null
+                        ? lw.GetAdminOnly()
+                        : entry.AdminOnly;
+                    if (adminOnly) continue;
+                }
 
                 if (live.TryGetValue(entry.ShrineId, out var liveShrine) && liveShrine != null)
                 {

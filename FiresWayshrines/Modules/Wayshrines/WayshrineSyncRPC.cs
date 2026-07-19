@@ -1,4 +1,5 @@
 using FiresCore.Logging;
+using FiresCore.Net;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
@@ -56,6 +57,8 @@ namespace VerdantsAscent.Modules.Wayshrines
     {
         private const string RPC_RequestShrineList  = "FiresRPGmaker_WayshrineList_Request";
         private const string RPC_ShrineListResponse = "FiresRPGmaker_WayshrineList_Response";
+        private const string RPC_RequestWipe        = "FiresWayshrines_WipeRequest";   // admin client -> server
+        private const string RPC_WayshrineWipe      = "FiresWayshrines_Wipe";          // server -> all clients
 
         // ────────────────────────────────────────────────────────────────────
         //  RPC registration
@@ -78,6 +81,14 @@ namespace VerdantsAscent.Modules.Wayshrines
             ZRoutedRpc.instance.Register<ZPackage>(
                 RPC_ShrineListResponse,
                 new System.Action<long, ZPackage>(OnShrineListResponse));
+
+            ZRoutedRpc.instance.Register<ZPackage>(
+                RPC_RequestWipe,
+                new System.Action<long, ZPackage>(OnRequestWipe));
+
+            ZRoutedRpc.instance.Register<ZPackage>(
+                RPC_WayshrineWipe,
+                new System.Action<long, ZPackage>(OnWayshrineWipe));
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -114,6 +125,112 @@ namespace VerdantsAscent.Modules.Wayshrines
                 serverPeer.m_uid, RPC_RequestShrineList, pkg);
 
             FiresLogger.LogInfo("[Wayshrine] Requested authoritative shrine list from server.");
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  Wipe map marker (admin)
+        //
+        //  Server-authoritative: the shrine's discovery "epoch" (a ZDO int) is
+        //  bumped on the server. Online clients are told to clear immediately
+        //  via a broadcast; offline clients self-heal on next login because the
+        //  bumped epoch rides the shrine-list sync and the login prune clears
+        //  any discovery stamped at an older epoch (see WipeStaleByEpoch).
+        // ────────────────────────────────────────────────────────────────────
+
+        /// <summary>Admin-triggered from the context menu. Routes to the server, which performs the wipe.</summary>
+        public static void RequestWipe(Wayshrine shrine)
+        {
+            if (shrine == null || ZNet.instance == null) return;
+            var nview = shrine.GetComponent<ZNetView>();
+            var zdo = nview != null ? nview.GetZDO() : null;
+            if (zdo == null) return;
+
+            if (ZNet.instance.IsServer())
+            {
+                DoServerWipe(zdo.m_uid, shrine.ShrineId);
+                return;
+            }
+
+            var serverPeer = ZNet.instance.GetServerPeer();
+            if (serverPeer == null || ZRoutedRpc.instance == null) return;
+
+            var pkg = new ZPackage();
+            pkg.Write(zdo.m_uid);
+            pkg.Write(shrine.ShrineId ?? string.Empty);
+            ZRoutedRpc.instance.InvokeRoutedRPC(serverPeer.m_uid, RPC_RequestWipe, pkg);
+            FiresLogger.LogInfo($"[Wayshrine] Requested marker wipe for '{shrine.DisplayName}' from server.");
+        }
+
+        private static void OnRequestWipe(long sender, ZPackage pkg)
+        {
+            if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            var zdoid = pkg.ReadZDOID();
+            var shrineId = pkg.ReadString();
+            DoServerWipe(zdoid, shrineId);
+        }
+
+        private static void DoServerWipe(ZDOID zdoid, string shrineId)
+        {
+            int next;
+
+            // Prefer the live instance: BumpEpoch claims ZNetView ownership so the change persists +
+            // replicates via vanilla ZDO sync. The shrine is loaded (an admin is standing at it), so
+            // on a listen-host or dedicated server simulating that zone this is the path taken.
+            var live = FindLiveByZdoid(zdoid);
+            if (live != null)
+            {
+                next = live.BumpEpoch();
+            }
+            else
+            {
+                var zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(zdoid) : null;
+                if (zdo == null) { FiresLogger.LogWarning($"[Wayshrine] Wipe: ZDO {zdoid} not found."); return; }
+                next = zdo.GetInt(Wayshrine.ZdoDiscoveryEpoch, 0) + 1;
+                zdo.Set(Wayshrine.ZdoDiscoveryEpoch, next);
+                WayshrineWorldRegistry.Invalidate();
+            }
+
+            // Online clients clear immediately.
+            var pkg = new ZPackage();
+            pkg.Write(shrineId ?? string.Empty);
+            pkg.Write(next);
+            int sent = SafeRoutedRpc.InvokeSafeToAllExcept(0L, RPC_WayshrineWipe, pkg);
+
+            // Listen-host is also a player — clear our own discovery directly (the broadcast skips the server).
+            ApplyWipeLocally(shrineId, next);
+
+            FiresLogger.LogInfo($"[Wayshrine] Wiped marker for shrine id='{shrineId}' epoch={next}; notified {sent} client(s).");
+        }
+
+        private static Wayshrine FindLiveByZdoid(ZDOID id)
+        {
+            var all = WayshrineRegistry.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var w = all[i];
+                if (w == null) continue;
+                var nv = w.GetComponent<ZNetView>();
+                var z = nv != null ? nv.GetZDO() : null;
+                if (z != null && z.m_uid == id) return w;
+            }
+            return null;
+        }
+
+        private static void OnWayshrineWipe(long sender, ZPackage pkg)
+        {
+            if (ZNet.instance == null || ZNet.instance.IsServer()) return;  // host handled itself in DoServerWipe
+            var shrineId = pkg.ReadString();
+            int epoch = pkg.ReadInt();
+            ApplyWipeLocally(shrineId, epoch);
+        }
+
+        private static void ApplyWipeLocally(string shrineId, int epoch)
+        {
+            var player = Player.m_localPlayer;
+            if (player == null || string.IsNullOrEmpty(shrineId)) return;
+            WayshrineDiscovery.RemoveDiscovered(player, shrineId);
+            WayshrineDiscovery.SetDiscoveredEpoch(player, shrineId, epoch); // remember the wipe so re-discovery is allowed
+            WayshrineMapPins.RemovePinForShrine(shrineId);
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -157,13 +274,13 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             FiresLogger.LogInfo($"[Wayshrine] Received authoritative shrine list ({entries.Count} entries) from server.");
 
-            // DIAG (login-freeze investigation): bracket ValidateAndRebuild so the
-            // next repro log shows whether the freeze is inside the validate/rebuild
-            // path or in whatever runs after this RPC handler returns. Remove once
-            // the freeze is fixed.
-            Debug.Log("[Wayshrine][DIAG] ENTER ValidateAndRebuild");
+            // DIAG (login-freeze investigation): bracket ValidateAndRebuild so a
+            // repro log shows whether the freeze is inside the validate/rebuild
+            // path or in whatever runs after this RPC handler returns.
+            // Verbose-gated via FiresLogger.
+            FiresLogger.LogVerbose("[Wayshrine][DIAG] ENTER ValidateAndRebuild");
             ValidateAndRebuild();
-            Debug.Log("[Wayshrine][DIAG] EXIT ValidateAndRebuild (OnShrineListResponse returning)");
+            FiresLogger.LogVerbose("[Wayshrine][DIAG] EXIT ValidateAndRebuild (OnShrineListResponse returning)");
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -177,7 +294,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
         private static void ValidateAndRebuild()
         {
-            Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: enter, resolving local player…");
+            FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: enter, resolving local player…");
             var player = Player.m_localPlayer;
             if (player != null)
             {
@@ -186,24 +303,28 @@ namespace VerdantsAscent.Modules.Wayshrines
                 //              !IsServer); we run our own server-list pass.
                 if (ZNet.instance != null && ZNet.instance.IsServer())
                 {
-                    Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: host branch — PruneStaleDiscovery");
+                    FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: host branch — PruneStaleDiscovery");
                     WayshrineWorldRegistry.PruneStaleDiscovery(player);
                 }
                 else
                 {
-                    Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: client branch — PruneAgainstServerList ENTER");
+                    FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: client branch — PruneAgainstServerList ENTER");
                     PruneAgainstServerList(player);
-                    Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: client branch — PruneAgainstServerList EXIT");
+                    FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: client branch — PruneAgainstServerList EXIT");
                 }
+
+                // Catch wipes that happened while this player was offline: any discovery stamped at an
+                // epoch older than the shrine's current (synced) epoch is cleared before pins rebuild.
+                WipeStaleByEpoch(player);
             }
             else
             {
-                Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: m_localPlayer is null — skipping prune");
+                FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: m_localPlayer is null — skipping prune");
             }
 
-            Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: calling RebuildPinsForLocalPlayer");
+            FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: calling RebuildPinsForLocalPlayer");
             WayshrineMapPins.RebuildPinsForLocalPlayer();
-            Debug.Log("[Wayshrine][DIAG] ValidateAndRebuild: RebuildPinsForLocalPlayer returned");
+            FiresLogger.LogVerbose("[Wayshrine][DIAG] ValidateAndRebuild: RebuildPinsForLocalPlayer returned");
         }
 
         /// <summary>
@@ -242,6 +363,33 @@ namespace VerdantsAscent.Modules.Wayshrines
                 FiresLogger.LogInfo($"[Wayshrine] Server-validated discovery: removed {removed} stale entries.");
         }
 
+        /// <summary>
+        /// Clears any discovery whose recorded epoch is older than the shrine's current epoch — i.e. the
+        /// marker was wiped (possibly while this player was logged out). Works on every topology because
+        /// the epoch rides the authoritative shrine list.
+        /// </summary>
+        private static void WipeStaleByEpoch(Player player)
+        {
+            var all = WayshrineWorldRegistry.GetAll();
+            if (all.Count == 0) return;
+
+            int removed = 0;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var e = all[i];
+                if (e.Epoch <= 0) continue;
+                if (!WayshrineDiscovery.HasDiscovered(player, e.ShrineId)) continue;
+                if (WayshrineDiscovery.GetDiscoveredEpoch(player, e.ShrineId) >= e.Epoch) continue;
+
+                WayshrineDiscovery.RemoveDiscovered(player, e.ShrineId);
+                WayshrineDiscovery.SetDiscoveredEpoch(player, e.ShrineId, e.Epoch);
+                WayshrineMapPins.RemovePinForShrine(e.ShrineId);
+                removed++;
+            }
+            if (removed > 0)
+                FiresLogger.LogInfo($"[Wayshrine] Wiped {removed} discovery marker(s) stale by epoch (admin map-marker wipe).");
+        }
+
         // ────────────────────────────────────────────────────────────────────
         //  Wire format
         //
@@ -266,6 +414,10 @@ namespace VerdantsAscent.Modules.Wayshrines
                 pkg.Write(e.Position);
                 pkg.Write(e.Rotation);
                 pkg.Write(e.DisplayName ?? string.Empty);
+                pkg.Write(e.Epoch);
+                pkg.Write(e.AutoDiscover);
+                pkg.Write(e.AdminOnly);
+                pkg.Write(e.Cooldown);
             }
             return pkg;
         }
@@ -281,14 +433,22 @@ namespace VerdantsAscent.Modules.Wayshrines
                 var pos = pkg.ReadVector3();
                 var rot = pkg.ReadQuaternion();
                 var name = pkg.ReadString();
+                int epoch = pkg.ReadInt();
+                bool autoDiscover = pkg.ReadBool();
+                bool adminOnly = pkg.ReadBool();
+                float cooldown = pkg.ReadSingle();
                 result.Add(new WayshrineWorldRegistry.Entry
                 {
-                    Id          = id,
-                    PrefabName  = prefabName,
-                    Position    = pos,
-                    Rotation    = rot,
-                    DisplayName = name,
-                    ShrineId    = WayshrineDiscovery.MakeShrineId(prefabName, pos),
+                    Id           = id,
+                    PrefabName   = prefabName,
+                    Position     = pos,
+                    Rotation     = rot,
+                    DisplayName  = name,
+                    ShrineId     = WayshrineDiscovery.MakeShrineId(prefabName, pos),
+                    Epoch        = epoch,
+                    AutoDiscover = autoDiscover,
+                    AdminOnly    = adminOnly,
+                    Cooldown     = cooldown,
                 });
             }
             return result;

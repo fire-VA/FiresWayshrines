@@ -42,6 +42,8 @@ namespace VerdantsAscent.Modules.Wayshrines
             public bool AutoDiscover;  // pinned + usable on first login
             public bool AdminOnly;     // only visible/usable by admins
             public float Cooldown;     // per-player cooldown seconds for using this shrine as a destination
+            public string Group;       // network group; "" = world network (WayshrineGroups)
+            public bool IsGroupParent; // group gateway, also on the world network
         }
 
         private static readonly List<Entry> _cache = new List<Entry>();
@@ -151,6 +153,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                         AutoDiscover = zdo.GetBool(Wayshrine.ZdoAutoDiscover, false),
                         AdminOnly    = zdo.GetBool(Wayshrine.ZdoAdminOnly, false),
                         Cooldown     = zdo.GetFloat(Wayshrine.ZdoCooldownSeconds, 0f),
+                        Group        = WayshrineGroups.Normalize(zdo.GetString(Wayshrine.ZdoGroup, "")),
+                        IsGroupParent = zdo.GetBool(Wayshrine.ZdoGroupParent, false),
                     });
                 }
             }

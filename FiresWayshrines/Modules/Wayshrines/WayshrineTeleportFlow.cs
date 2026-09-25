@@ -30,13 +30,17 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (Minimap.instance == null) return;
 
             _armedSource = source;
+            WayshrineMapPins.RebuildPinsForLocalPlayer();
             Minimap.instance.SetMapMode(Minimap.MapMode.Large);
 
-            FiresLogger.LogInfo($"[Wayshrine] Armed source='{source.DisplayName}' id='{source.ShrineId}'. Map opened, waiting for pin click.");
+            FiresLogger.LogInfo($"[Wayshrine] Armed source='{source.DisplayName}' id='{source.ShrineId}' ({WayshrineGroups.Describe(source.GetGroup(), source.IsGroupParent())}). Map opened, waiting for pin click.");
 
+            string scope = WayshrineGroups.IsOnWorldNetwork(source.GetGroup(), source.IsGroupParent())
+                ? "click a wayshrine pin"
+                : "click a wayshrine pin in this network";
             MessageHud.instance?.ShowMessage(
                 MessageHud.MessageType.TopLeft,
-                $"Choose destination — click a wayshrine pin (escape to cancel).");
+                $"Choose destination — {scope} (escape to cancel).");
         }
 
         /// <summary>
@@ -50,7 +54,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             var player = Player.m_localPlayer;
             if (player == null) return false;
 
-            var dest = WayshrineLookup.FindClosestDiscovered(player, worldClickPos, pickRadius);
+            var dest = WayshrineLookup.FindClosestReachable(player, _armedSource, worldClickPos, pickRadius);
             if (!dest.HasValue) return false;
 
             if (dest.Value.Id == _armedSource.ShrineId)
@@ -65,7 +69,12 @@ namespace VerdantsAscent.Modules.Wayshrines
             return true;
         }
 
-        public static void Disarm() => _armedSource = null;
+        public static void Disarm()
+        {
+            if (_armedSource == null) return;
+            _armedSource = null;
+            WayshrineMapPins.RebuildPinsForLocalPlayer();
+        }
 
         // ---------------- Confirm popup ----------------
 
@@ -141,7 +150,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             if (WayshrineConfig.RespectNoTeleportItems?.Value ?? true)
             {
-                if (!player.IsTeleportable())
+                if (!player.IsTeleportable(allowAllItems: false))
                 {
                     reason = "$msg_noteleport";
                     return false;
@@ -210,6 +219,13 @@ namespace VerdantsAscent.Modules.Wayshrines
                 return false;
             }
 
+            // Network re-check: a group may have been reassigned while the map was open.
+            if (source != null && !WayshrineGroups.CanTravel(source, dest))
+            {
+                player.Message(MessageHud.MessageType.Center, "That wayshrine isn't on this network.", 0, null);
+                return false;
+            }
+
             double now = ZNet.instance != null ? ZNet.instance.GetTimeSeconds() : Time.time;
 
             // Admin per-shrine cooldown — gates using THIS shrine, as the source you leave from OR the
@@ -244,6 +260,8 @@ namespace VerdantsAscent.Modules.Wayshrines
             // preferring a spot with clear headroom so we don't rematerialize inside geometry.
             Vector3 exit = ChooseLandingPosition(dest, out Quaternion rot);
             player.TeleportTo(exit, rot, distantTeleport: true);
+            if (!dest.IsLive)
+                player.StartCoroutine(SettleOntoRingAfterArrival(player, dest.Id));
 
             FiresLogger.LogInfo($"[Wayshrine] Teleport: {source.DisplayName} -> {dest.DisplayName} ({cost} coins, isLive={dest.IsLive}, recent={WayshrineDiscovery.ReadAndPruneCooldownTimestamps(player, now).Count})");
             return true;
@@ -310,54 +328,123 @@ namespace VerdantsAscent.Modules.Wayshrines
             return false;  // unloaded destination: per-shrine override not carried in the sync yet
         }
 
+
         // ---------------- Landing placement ----------------
 
         private const float LandMinRadius = 2f;   // never land ON the shrine / the landmark it wraps
         private const float LandMaxRadius = 12f;
+        private const int LandAttempts = 24;
+        private const float LandProbeAbove = 1.6f;
+        private const float LandProbeBelow = 6f;
+        private const float EyeHeight = 1.2f;
+        private const float WadeDepth = 0.4f;
+        private const float OnTerrainTolerance = 1f;
+        private const float ArrivalSettleTimeoutSeconds = 30f;
 
         /// <summary>
-        /// Picks a landing point in a 2–12 m ring around the destination centre. Samples several angles/radii,
-        /// resolves the top-of-solids height (loaded) or heightmap (unloaded), and takes the first spot with
-        /// clear headroom so the player doesn't teleport inside geometry. Faces outward from the centre.
-        /// Vanilla's own post-teleport FindFloor (Player.cs) then refines the exact Y.
+        /// Where the player lands. Loaded destination: a safe spot in the 2-12 m ring (see FindSafeRingSpot).
+        /// Unloaded destination: there are no colliders yet, so aim at the spot in front of the shrine at the shrine's
+        /// own height; vanilla's post-teleport FindFloor casts down from 1 m above that and settles on the floor the
+        /// shrine stands on (a dungeon floor, not the terrain far below), then SettleOntoRingAfterArrival moves the
+        /// player into the ring once the area has loaded.
         /// </summary>
         private static Vector3 ChooseLandingPosition(DiscoveredShrine dest, out Quaternion rot)
         {
-            Vector3 center = (dest.IsLive && dest.LiveInstance != null) ? dest.LiveInstance.transform.position : dest.Position;
             bool loaded = dest.IsLive && dest.LiveInstance != null;
-            var zs = ZoneSystem.instance;
-
-            Vector3 chosen = center;
-            for (int i = 0; i < 16; i++)
-            {
-                float ang = UnityEngine.Random.value * Mathf.PI * 2f;
-                // area-uniform radius so points aren't bunched near the inner edge
-                float rr = Mathf.Lerp(LandMinRadius * LandMinRadius, LandMaxRadius * LandMaxRadius, UnityEngine.Random.value);
-                float r = Mathf.Sqrt(rr);
-                Vector3 xz = center + new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang)) * r;
-
-                float y = center.y;
-                if (zs != null)
-                {
-                    if (loaded && zs.GetSolidHeight(xz, out float sh)) y = sh;
-                    else if (zs.GetGroundHeight(xz, out float gh)) y = gh;
-                }
-                Vector3 cand = new Vector3(xz.x, y, xz.z);
-
-                if (!loaded || IsClearSpot(cand)) { chosen = cand; break; }
-                if (i == 15) chosen = cand;   // give up after N tries — still off-centre, vanilla FindFloor will nudge
-            }
-
-            Vector3 outward = chosen - center; outward.y = 0f;
-            rot = outward.sqrMagnitude > 0.01f ? Quaternion.LookRotation(outward.normalized) : Quaternion.identity;
+            Vector3 center = loaded ? dest.LiveInstance.transform.position : dest.Position;
+            Quaternion facing = loaded ? dest.LiveInstance.transform.rotation : dest.Rotation;
+            Vector3 front = FrontOfShrine(center, facing);
+            Vector3 chosen = loaded && TryFindSafeRingSpot(center, out Vector3 ring) ? ring : front;
+            rot = FaceAway(center, chosen, facing);
             return chosen + Vector3.up * 0.5f;
         }
 
-        private static bool IsClearSpot(Vector3 ground)
+        private static System.Collections.IEnumerator SettleOntoRingAfterArrival(Player player, string shrineId)
+        {
+            float deadline = Time.time + ArrivalSettleTimeoutSeconds;
+            while (player != null && player.IsTeleporting() && Time.time < deadline)
+                yield return null;
+            yield return null;
+            if (player == null || player.IsTeleporting()) yield break;
+
+            Wayshrine arrived = null;
+            foreach (Wayshrine shrine in WayshrineRegistry.All)
+                if (shrine != null && shrine.ShrineId == shrineId) { arrived = shrine; break; }
+            if (arrived == null) yield break;
+
+            Vector3 center = arrived.transform.position;
+            if (!TryFindSafeRingSpot(center, out Vector3 ring)) yield break;
+            player.transform.position = ring + Vector3.up * 0.1f;
+            player.transform.rotation = FaceAway(center, ring, arrived.transform.rotation);
+        }
+
+        /// <summary>
+        /// A random spot 2-12 m from the shrine that is safe to stand on. The floor comes from a SHORT downward probe
+        /// that starts just above the shrine's own base: vanilla's GetSolidHeight casts from 1000 m up, returned the
+        /// top of any roof, and so put players on top of dungeons, caves and buildings. A candidate must also be in
+        /// plain sight of the shrine (same room, not behind a wall or above a ceiling), have headroom, and not be in
+        /// water deeper than knee height (freezing in the Deep North, burning in the Ashlands sea) or on lava.
+        /// </summary>
+        private static bool TryFindSafeRingSpot(Vector3 center, out Vector3 spot)
+        {
+            int floorMask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain");
+            int wallMask = LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
+            Vector3 shrineEye = center + Vector3.up * EyeHeight;
+            for (int attempt = 0; attempt < LandAttempts; attempt++)
+            {
+                Vector3 ring = center + RandomRingOffset();
+                Vector3 probe = new Vector3(ring.x, center.y + LandProbeAbove, ring.z);
+                if (!Physics.Raycast(probe, Vector3.down, out RaycastHit hit, LandProbeAbove + LandProbeBelow, floorMask, QueryTriggerInteraction.Ignore))
+                    continue;
+                if (hit.collider.attachedRigidbody != null)
+                    continue;
+                Vector3 ground = hit.point;
+                if (Physics.Linecast(shrineEye, ground + Vector3.up * EyeHeight, wallMask, QueryTriggerInteraction.Ignore))
+                    continue;
+                if (IsHazardous(ground) || !HasHeadroom(ground))
+                    continue;
+                spot = ground;
+                return true;
+            }
+            spot = center;
+            return false;
+        }
+
+        private static Vector3 RandomRingOffset()
+        {
+            float angle = UnityEngine.Random.value * Mathf.PI * 2f;
+            float radius = Mathf.Sqrt(Mathf.Lerp(LandMinRadius * LandMinRadius, LandMaxRadius * LandMaxRadius, UnityEngine.Random.value));
+            return new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+        }
+
+        private static Vector3 FrontOfShrine(Vector3 center, Quaternion facing)
+        {
+            Vector3 forward = facing * Vector3.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
+            return center + forward.normalized * LandMinRadius;
+        }
+
+        private static Quaternion FaceAway(Vector3 center, Vector3 spot, Quaternion fallback)
+        {
+            Vector3 outward = spot - center;
+            outward.y = 0f;
+            return outward.sqrMagnitude > 0.01f ? Quaternion.LookRotation(outward.normalized) : fallback;
+        }
+
+        private static bool IsHazardous(Vector3 ground)
+        {
+            if (Floating.GetLiquidLevel(ground + Vector3.up * 0.1f) > ground.y + WadeDepth)
+                return true;
+            var zones = ZoneSystem.instance;
+            if (zones == null || !zones.GetGroundHeight(ground, out float terrain) || Mathf.Abs(ground.y - terrain) > OnTerrainTolerance)
+                return false;
+            return zones.IsLava(ground);
+        }
+
+        private static bool HasHeadroom(Vector3 ground)
         {
             int mask = LayerMask.GetMask("Default", "static_solid", "piece");
-            if (mask == 0) return true;
-            // No solid geometry where the player's capsule would stand.
             return !Physics.CheckCapsule(ground + Vector3.up * 0.4f, ground + Vector3.up * 1.7f, 0.4f, mask, QueryTriggerInteraction.Ignore);
         }
     }

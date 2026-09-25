@@ -65,8 +65,8 @@ namespace FiresWayshrines
         }
 
         // Compact banner — stone arch with a swirling gate over a status frame.
-        // 31-char frame body (3 lead + ╔ + 26 ═ + ╗); 🌀 is a surrogate pair
-        // (.Length 2) that renders 2 cells, so plain padding to 26 holds.
+        // 31-char frame body (3 lead + ╔ + 26 ═ + ╗); 🌀 is a surrogate pair, but the console
+        // ADVANCES ONE column for it (no VS16), however wide the font paints the glyph, so this row pads it as one cell.
         private static readonly Banner.Segment[][] s_compactLines =
         {
             new[] { new Banner.Segment("            ▄█████████▄",      ConsoleColor.DarkGray) },
@@ -102,7 +102,7 @@ namespace FiresWayshrines
             {
                 new Banner.Segment("   ║      ",           ConsoleColor.DarkGray),
                 new Banner.Segment("🌀 PATHS OPEN",        ConsoleColor.Cyan),
-                new Banner.Segment("       ║",             ConsoleColor.DarkGray),
+                new Banner.Segment("        ║",             ConsoleColor.DarkGray),
             },
             new[] { new Banner.Segment("   ╚══════════════════════════╝", ConsoleColor.DarkGray) },
             new[] { new Banner.Segment("    FIRES WAYSHRINES",         ConsoleColor.Cyan) },

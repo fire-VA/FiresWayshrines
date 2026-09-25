@@ -40,6 +40,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         {
             if (shrine == null || Minimap.instance == null) return;
             if (shrine.GetAdminOnly() && !Wayshrine.IsLocalPlayerAdmin()) return; // admin-only: invisible to non-admins
+            if (!WayshrineGroups.ShowsOnMap(shrine.ShrineId, shrine.GetGroup(), shrine.IsGroupParent(), WayshrineTeleportFlow.ArmedSource)) return;
             if (_pinByShrineId.TryGetValue(shrine.ShrineId, out var existing))
             {
                 if (existing != null && existing.m_type == DiscoveredPinType) return;
@@ -90,6 +91,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (player == null) return;
 
             if (shrine.GetAdminOnly() && !Wayshrine.IsLocalPlayerAdmin()) return; // admin-only: invisible to non-admins
+            if (!WayshrineGroups.ShowsOnMap(shrine.ShrineId, shrine.GetGroup(), shrine.IsGroupParent(), WayshrineTeleportFlow.ArmedSource)) return;
 
             if (WayshrineDiscovery.HasDiscovered(player, shrine.ShrineId))
             {
@@ -145,6 +147,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             var discovered = WayshrineDiscovery.GetAllDiscovered(player);
             bool showLocked = WayshrineConfig.ShowUndiscoveredAsLocked?.Value ?? false;
             bool isAdmin = Wayshrine.IsLocalPlayerAdmin();
+            Wayshrine armedSource = WayshrineTeleportFlow.ArmedSource;
             FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: discovered={discovered.Count}, showLocked={showLocked}");
 
             // Live shrines first — authoritative position + name.
@@ -161,6 +164,13 @@ namespace VerdantsAscent.Modules.Wayshrines
                 if (shrine == null) continue;
 
                 if (shrine.GetAdminOnly() && !isAdmin) { seen.Add(shrine.ShrineId); continue; } // hidden from non-admins
+                if (!WayshrineGroups.ShowsOnMap(shrine.ShrineId, shrine.GetGroup(), shrine.IsGroupParent(), armedSource))
+                {
+                    if (shrine.GetAutoDiscover() && !discovered.Contains(shrine.ShrineId))
+                        WayshrineDiscovery.MarkDiscovered(player, shrine.ShrineId, shrine.GetEpoch());
+                    seen.Add(shrine.ShrineId);
+                    continue;
+                }
 
                 // Auto-discover shrines become known (and usable) the moment they're seen.
                 if (shrine.GetAutoDiscover() && !discovered.Contains(shrine.ShrineId))
@@ -186,6 +196,12 @@ namespace VerdantsAscent.Modules.Wayshrines
             {
                 if (!seen.Add(entry.ShrineId)) continue;
                 if (entry.AdminOnly && !isAdmin) continue; // hidden from non-admins
+                if (!WayshrineGroups.ShowsOnMap(entry.ShrineId, entry.Group ?? "", entry.IsGroupParent, armedSource))
+                {
+                    if (entry.AutoDiscover && !discovered.Contains(entry.ShrineId))
+                        WayshrineDiscovery.MarkDiscovered(player, entry.ShrineId, entry.Epoch);
+                    continue;
+                }
 
                 if (entry.AutoDiscover && !discovered.Contains(entry.ShrineId))
                     WayshrineDiscovery.MarkDiscovered(player, entry.ShrineId, entry.Epoch);

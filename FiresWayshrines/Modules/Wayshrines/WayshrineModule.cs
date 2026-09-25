@@ -63,6 +63,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (prefab == null) return false;
             if (prefab.GetComponent<Wayshrine>() == null)
                 prefab.AddComponent<Wayshrine>();
+            HardenAgainstWeather(prefab);
 
             // Mirror the existing piece-registration pattern (VAPieceManager
             // expects it on the FiresWayshrinesPlugin.piecePrefabs list).
@@ -71,6 +72,24 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             FiresLogger.LogVerbose($"[Wayshrine] Attached Wayshrine component to '{prefab.name}'.");
             return true;
+        }
+
+        /// <summary>
+        /// Wayshrines are network infrastructure, so weather must never wear them down. Valheim 1.0's Deep North
+        /// buries unimmune pieces under heavy snow, the Ashlands burn them, rain wears unroofed ones, and deep snow
+        /// forbids placing ordinary pieces at all. The wear flag names read backwards: TRUE enables wear. With
+        /// support wear off, heavy snow can't hurt the piece even under the AllHeavySnow world modifier.
+        /// </summary>
+        private static void HardenAgainstWeather(GameObject prefab)
+        {
+            if (prefab.TryGetComponent(out Piece piece))
+                piece.m_allowedInDeepSnow = true;
+            if (!prefab.TryGetComponent(out WearNTear wear))
+                return;
+            wear.m_noRoofWear = false;
+            wear.m_noSupportWear = false;
+            wear.m_snowDamageImmune = true;
+            wear.m_ashDamageImmune = true;
         }
 
         private static bool IsWayshrinePrefab(GameObject prefab)

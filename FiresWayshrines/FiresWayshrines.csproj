@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -13,10 +13,8 @@
     <LangVersion>latest</LangVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- Public-test build toggle, same pattern as the rest of the family. Default false (live);
-         override with /p:PublicTest=true when compiling against a public-test assembly_valheim. -->
-    <PublicTest Condition=" '$(PublicTest)' == '' ">false</PublicTest>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -35,9 +33,6 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(PublicTest)' == 'true' ">
-    <DefineConstants>$(DefineConstants);PUBLIC_TEST</DefineConstants>
-  </PropertyGroup>
   <ItemGroup>
     <Reference Include="0Harmony">
       <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim dedicated server\BepInEx\core\0Harmony.dll</HintPath>
@@ -54,9 +49,9 @@
     <!-- Pinned to the centralized legacy stash (NOT $(GamePath)/live Steam) so the emitted
          GetStableHashCode IL stays branch-deterministic. See reference_assembly_utils_pin. -->
     <Reference Include="assembly_utils">
-      <HintPath>..\..\assembly_valheim\lib\assembly_utils.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
+      <HintPath>$(GamePath)\valheim_Data\Managed\assembly_utils.dll</HintPath>
+      <Private>False</Private>
+      </Reference>
     <Reference Include="assembly_guiutils">
       <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\assembly_guiutils.dll</HintPath>
     </Reference>
@@ -65,7 +60,7 @@
       <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\Splatform.dll</HintPath>
     </Reference>
     <Reference Include="FiresUnifiedCore">
-      <HintPath>..\..\FiresUnifiedCore\FiresUnifiedCore\bin\Debug\FiresUnifiedCore.dll</HintPath>
+      <HintPath>..\..\FiresUnifiedCore\FiresUnifiedCore\bin\Release\FiresUnifiedCore.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine">
@@ -115,6 +110,7 @@
     <Compile Include="Modules\Wayshrines\WayshrineCostCalculator.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineDiscovery.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineIconBaker.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrineGroups.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineLookup.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineMapPins.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineModule.cs" />
@@ -124,6 +120,7 @@
     <Compile Include="Modules\Wayshrines\WayshrineTeleportFlow.cs" />
     <Compile Include="Modules\Wayshrines\TeleporterHubConfig.cs" />
     <Compile Include="Modules\Wayshrines\WayshrinesApi.cs" />
+    <Compile Include="Modules\Wayshrines\WayshrineHelpContent.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTeleportPopup.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTriggerScaling.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTriggerWire.cs" />
@@ -133,6 +130,7 @@
     <Compile Include="Modules\Wayshrines\Patches\UnifiedPopupButtonLabelPatch.cs" />
     <Compile Include="Modules\Wayshrines\Patches\WayshrineDestructionPatch.cs" />
     <Compile Include="Modules\Wayshrines\TownPortalScroll\TownPortalScrollHandler.cs" />
+    <Compile Include="Modules\Wayshrines\TownPortalScroll\TownPortalScrollItem.cs" />
     <Compile Include="Modules\Wayshrines\TownPortalScroll\TownPortalScrollRecipe.cs" />
     <Compile Include="Utilities\FiresLogger.cs" />
     <Compile Include="Utilities\FiresWayshrinesBanner.cs" />
@@ -142,17 +140,4 @@
     <EmbeddedResource Include="fireswayshrines" Condition="Exists('$(MSBuildProjectDirectory)\fireswayshrines')" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <PropertyGroup>
-    <BlueHillsPluginDir>C:\Users\travi\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\BlueHills\BepInEx\plugins\FiresWayshrines\</BlueHillsPluginDir>
-    <BlueHillsDediDir>C:\Program Files (x86)\Steam\steamapps\common\Valheim dedicated server - BlueHills\BepInEx\plugins\FiresWayshrines\</BlueHillsDediDir>
-  </PropertyGroup>
-  <Target Name="DeployToBlueHills" AfterTargets="Build" Condition="Exists('$(BlueHillsPluginDir)')">
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BlueHillsPluginDir)" OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(BlueHillsPluginDir)" OverwriteReadOnlyFiles="true" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
-    <Message Importance="high" Text="Deployed $(TargetFileName) (+pdb) -&gt; $(BlueHillsPluginDir)" />
-  </Target>
-  <Target Name="DeployToBlueHillsDedi" AfterTargets="Build" Condition="Exists('$(BlueHillsDediDir)')">
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BlueHillsDediDir)" OverwriteReadOnlyFiles="true" />
-    <Message Importance="high" Text="Deployed $(TargetFileName) -&gt; $(BlueHillsDediDir)" />
-  </Target>
 </Project>

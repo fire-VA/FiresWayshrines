@@ -29,7 +29,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         {
             if (!WayshrineTeleportFlow.IsArmed) return true;
 
-            var worldPos = MinimapPatchUtil.ScreenToWorld(__instance, ZInput.mousePosition);
+            var worldPos = MinimapPatchUtil.ScreenToWorld(__instance, ZInput.pointerPosition);
             float pickRadius = MinimapPatchUtil.PickRadius(__instance);
 
             if (WayshrineTeleportFlow.TryConsumeMapClick(worldPos, pickRadius))
@@ -39,7 +39,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         }
     }
 
-    [HarmonyPatch(typeof(Minimap), "OnMapRightClick")]
+    [HarmonyPatch(typeof(Minimap), "RemovePinUnderPointer")]
     internal static class MinimapRightClickPatch
     {
         [HarmonyPrefix]
@@ -47,7 +47,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         {
             if (Player.m_localPlayer == null) return true;
 
-            var worldPos = MinimapPatchUtil.ScreenToWorld(__instance, ZInput.mousePosition);
+            var worldPos = MinimapPatchUtil.ScreenToWorld(__instance, ZInput.pointerPosition);
             float pickRadius = MinimapPatchUtil.PickRadius(__instance);
 
             // Find the nearest LOADED wayshrine to the click. Rename only

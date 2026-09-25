@@ -59,6 +59,10 @@ namespace VerdantsAscent.Modules.Wayshrines
         private const string RPC_ShrineListResponse = "FiresRPGmaker_WayshrineList_Response";
         private const string RPC_RequestWipe        = "FiresWayshrines_WipeRequest";   // admin client -> server
         private const string RPC_WayshrineWipe      = "FiresWayshrines_Wipe";          // server -> all clients
+        private const string RPC_SettingsChanged    = "FiresWayshrines_SettingsChanged"; // admin client -> server
+        private const float ZdoPropagationDelaySeconds = 2f;
+
+        private static bool _listBroadcastPending;
 
         // ────────────────────────────────────────────────────────────────────
         //  RPC registration
@@ -89,6 +93,63 @@ namespace VerdantsAscent.Modules.Wayshrines
             ZRoutedRpc.instance.Register<ZPackage>(
                 RPC_WayshrineWipe,
                 new System.Action<long, ZPackage>(OnWayshrineWipe));
+
+            ZRoutedRpc.instance.Register<ZPackage>(
+                RPC_SettingsChanged,
+                new System.Action<long, ZPackage>(OnSettingsChanged));
+            _listBroadcastPending = false;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  Admin setting changed → everyone's cached list refreshes
+        //
+        //  Dedicated clients hold a server list for UNLOADED shrines, fetched
+        //  once at login. Without a push, a shrine an admin just moved into a
+        //  dungeon group (or made admin-only) stayed reachable from that stale
+        //  cache until the next relog. The admin's ZDO write reaches the server
+        //  on ZDOMan's own schedule, so the server waits a moment before it
+        //  rescans and pushes the list to every peer.
+        // ────────────────────────────────────────────────────────────────────
+
+        public static void AnnounceSettingsChanged()
+        {
+            if (ZNet.instance == null || ZRoutedRpc.instance == null) return;
+            if (ZNet.instance.IsServer())
+            {
+                ScheduleListBroadcast();
+                return;
+            }
+            var serverPeer = ZNet.instance.GetServerPeer();
+            if (serverPeer != null)
+                ZRoutedRpc.instance.InvokeRoutedRPC(serverPeer.m_uid, RPC_SettingsChanged, new ZPackage());
+        }
+
+        private static void OnSettingsChanged(long sender, ZPackage pkg)
+        {
+            if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) return;
+            ScheduleListBroadcast();
+        }
+
+        private static void ScheduleListBroadcast()
+        {
+            if (_listBroadcastPending) return;
+            _listBroadcastPending = true;
+            ZNet.instance.StartCoroutine(BroadcastListAfterDelay());
+        }
+
+        private static System.Collections.IEnumerator BroadcastListAfterDelay()
+        {
+            yield return new WaitForSeconds(ZdoPropagationDelaySeconds);
+            _listBroadcastPending = false;
+            if (ZNet.instance == null || ZRoutedRpc.instance == null) yield break;
+
+            WayshrineWorldRegistry.Invalidate();
+            var entries = WayshrineWorldRegistry.GetAll();
+            ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, RPC_ShrineListResponse, SerializeEntries(entries));
+            if (Player.m_localPlayer != null)
+                ValidateAndRebuild();
+            FiresLogger.LogInfo($"[Wayshrine] Pushed the shrine list ({entries.Count} entries) to every peer after an admin change.");
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -164,6 +225,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static void OnRequestWipe(long sender, ZPackage pkg)
         {
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) return;
             var zdoid = pkg.ReadZDOID();
             var shrineId = pkg.ReadString();
             DoServerWipe(zdoid, shrineId);
@@ -394,7 +456,10 @@ namespace VerdantsAscent.Modules.Wayshrines
         //  Wire format
         //
         //  count:int + per-entry { ZDOID, string prefab, Vector3 pos,
-        //                          Quaternion rot, string displayName }
+        //                          Quaternion rot, string displayName,
+        //                          int epoch, bool autoDiscover, bool adminOnly,
+        //                          float cooldown, string group, bool groupParent }
+        //  Append-only; client and server must run the same build.
         //
         //  ShrineId is NOT shipped — it's deterministically derived from
         //  prefab + pos via WayshrineDiscovery.MakeShrineId, so keeping that
@@ -418,6 +483,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                 pkg.Write(e.AutoDiscover);
                 pkg.Write(e.AdminOnly);
                 pkg.Write(e.Cooldown);
+                pkg.Write(e.Group ?? string.Empty);
+                pkg.Write(e.IsGroupParent);
             }
             return pkg;
         }
@@ -437,6 +504,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                 bool autoDiscover = pkg.ReadBool();
                 bool adminOnly = pkg.ReadBool();
                 float cooldown = pkg.ReadSingle();
+                string group = WayshrineGroups.Normalize(pkg.ReadString());
+                bool isGroupParent = pkg.ReadBool();
                 result.Add(new WayshrineWorldRegistry.Entry
                 {
                     Id           = id,
@@ -449,6 +518,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                     AutoDiscover = autoDiscover,
                     AdminOnly    = adminOnly,
                     Cooldown     = cooldown,
+                    Group        = group,
+                    IsGroupParent = isGroupParent,
                 });
             }
             return result;

@@ -50,6 +50,11 @@ namespace VerdantsAscent.Modules.Wayshrines
             items.Add(ContextMenuItem.Row($"Auto-discover:  {OnOff(shrine.GetAutoDiscover())}", () => ToggleAutoDiscover(shrine)));
             items.Add(ContextMenuItem.Row($"Admin-only:  {OnOff(shrine.GetAdminOnly())}",       () => ToggleAdminOnly(shrine)));
             items.Add(ContextMenuItem.Sep());
+            items.Add(ContextMenuItem.Row($"Network group…  (now: {WayshrineGroups.Describe(shrine.GetGroup(), shrine.IsGroupParent())})",
+                () => PromptGroup(shrine)));
+            items.Add(ContextMenuItem.Row($"Group parent (way in and out):  {OnOff(shrine.IsGroupParent())}",
+                () => ToggleGroupParent(shrine), enabled: shrine.GetGroup().Length > 0));
+            items.Add(ContextMenuItem.Sep());
             items.Add(ContextMenuItem.Row("Wipe map marker (all players)",      () => WayshrineSyncRPC.RequestWipe(shrine)));
             return items;
         }
@@ -110,6 +115,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                 if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float sec) && sec >= 0f)
                 {
                     shrine.SetCooldownSeconds(sec);
+                    WayshrineSyncRPC.AnnounceSettingsChanged();
                     Toast(sec <= 0f ? "Cooldown: none" : $"Cooldown: {Mathf.RoundToInt(sec)}s per player");
                 }
                 else Toast("Enter seconds ≥ 0 (0 = none).");
@@ -124,6 +130,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                 WayshrineDiscovery.MarkDiscovered(Player.m_localPlayer, shrine.ShrineId, shrine.GetEpoch());
             WayshrineMapPins.RemovePinForShrine(shrine.ShrineId);
             WayshrineMapPins.AddPinForShrineRespectingDiscovery(shrine);
+            WayshrineSyncRPC.AnnounceSettingsChanged();
             Toast($"Auto-discover {OnOff(on)}");
         }
 
@@ -134,7 +141,37 @@ namespace VerdantsAscent.Modules.Wayshrines
             // Re-evaluate the local pin immediately (hidden for non-admins; the admin keeps seeing it).
             WayshrineMapPins.RemovePinForShrine(shrine.ShrineId);
             WayshrineMapPins.AddPinForShrineRespectingDiscovery(shrine);
+            WayshrineSyncRPC.AnnounceSettingsChanged();
             Toast($"Admin-only {OnOff(on)}");
+        }
+
+        private static void PromptGroup(Wayshrine shrine)
+        {
+            if (TextInput.instance == null) { Toast("TextInput unavailable."); return; }
+            TextInput.instance.RequestText(new PromptReceiver(shrine.GetGroup(), s =>
+            {
+                string group = WayshrineGroups.Normalize(s);
+                shrine.SetGroup(group);
+                if (group.Length == 0 && shrine.IsGroupParent())
+                    shrine.SetGroupParent(false);
+                AfterNetworkChange(shrine, group, group.Length > 0 && shrine.IsGroupParent());
+            }), "Network group  (blank = world network; same name = same dungeon network)", WayshrineGroups.MaxGroupNameLength);
+        }
+
+        private static void ToggleGroupParent(Wayshrine shrine)
+        {
+            string group = shrine.GetGroup();
+            if (group.Length == 0) { Toast("Set a network group first."); return; }
+            bool on = !shrine.IsGroupParent();
+            shrine.SetGroupParent(on);
+            AfterNetworkChange(shrine, group, on);
+        }
+
+        private static void AfterNetworkChange(Wayshrine shrine, string group, bool isParent)
+        {
+            WayshrineMapPins.RebuildPinsForLocalPlayer();
+            WayshrineSyncRPC.AnnounceSettingsChanged();
+            Toast($"{shrine.DisplayName}: {WayshrineGroups.Describe(group, isParent)}");
         }
 
         private static string OnOff(bool b) => b ? "ON" : "OFF";

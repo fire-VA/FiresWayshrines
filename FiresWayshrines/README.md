@@ -61,7 +61,7 @@ pinned to `..\..\assembly_valheim\lib\assembly_utils.dll` (branch-deterministic
 ```
 MSBuild FiresWayshrines.csproj /p:Configuration=Debug /p:UseSharedCompilation=false /nodeReuse:false /m:1
 ```
-A post-build target deploys the DLL+PDB into the BlueHills r2modman test profile.
+A post-build target deploys the DLL+PDB into the retired main rig r2modman test profile.
 
 ## Not yet wired (next steps)
 - **FiresNPCs bridge** — `NpcType.Teleporter` + `Bridges/WayshrinesBridge.cs` so an NPC can

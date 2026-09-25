@@ -45,7 +45,7 @@ namespace VerdantsAscent.Modules.Wayshrines.TownPortalScroll
         private static void ShowChoicePopup(Player player, Inventory inventory, ItemDrop.ItemData item)
         {
             var spawn = TryGetCustomSpawnPoint(out bool hasSpawn);
-            var nearest = WayshrineLookup.FindClosestDiscovered(player, player.transform.position);
+            var nearest = WayshrineLookup.FindClosestOnWorldNetwork(player, player.transform.position);
 
             if (!hasSpawn && !nearest.HasValue)
             {

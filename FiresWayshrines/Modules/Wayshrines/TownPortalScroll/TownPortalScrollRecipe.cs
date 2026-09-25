@@ -38,8 +38,7 @@ namespace VerdantsAscent.Modules.Wayshrines.TownPortalScroll
             var scrollPrefab = ObjectDB.instance.GetItemPrefab(ScrollPrefabName);
             if (scrollPrefab == null)
             {
-                FiresLogger.LogWarning($"[TownPortalScroll] '{ScrollPrefabName}' not in ObjectDB; recipe skipped. " +
-                                       "Make sure the prefab is in the asset bundle and listed in VAItemManager.ItemNameList.");
+                FiresLogger.LogWarning($"[TownPortalScroll] '{ScrollPrefabName}' not in ObjectDB (missing from the fireswayshrines bundle?); recipe skipped.");
                 return;
             }
 

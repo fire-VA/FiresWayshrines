@@ -28,13 +28,24 @@ namespace VerdantsAscent.Modules.Wayshrines
         public Vector3 Position;
         public Quaternion Rotation;
         public Wayshrine LiveInstance;
+        public string Group;
+        public bool IsGroupParent;
 
         public bool IsLive => LiveInstance != null;
     }
 
     public static class WayshrineLookup
     {
-        public static DiscoveredShrine? FindClosestDiscovered(Player player, Vector3 from, float maxDistanceXZ = float.MaxValue)
+        /// <summary>The discovered shrine nearest a map click that the armed source can actually reach.</summary>
+        public static DiscoveredShrine? FindClosestReachable(Player player, Wayshrine source, Vector3 from, float maxDistanceXZ) =>
+            FindClosestDiscovered(player, from, maxDistanceXZ, shrine => WayshrineGroups.CanTravel(source, shrine));
+
+        /// <summary>The nearest discovered shrine on the world network — never a closed group's inner shrine.</summary>
+        public static DiscoveredShrine? FindClosestOnWorldNetwork(Player player, Vector3 from) =>
+            FindClosestDiscovered(player, from, float.MaxValue, shrine => WayshrineGroups.IsOnWorldNetwork(shrine.Group, shrine.IsGroupParent));
+
+        public static DiscoveredShrine? FindClosestDiscovered(Player player, Vector3 from, float maxDistanceXZ = float.MaxValue,
+            System.Func<DiscoveredShrine, bool> accept = null)
         {
             if (player == null) return null;
             DiscoveredShrine? best = null;
@@ -42,6 +53,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             foreach (var s in EnumerateDiscovered(player))
             {
+                if (accept != null && !accept(s)) continue;
                 Vector3 d = s.Position - from; d.y = 0f;
                 float sqr = d.sqrMagnitude;
                 if (sqr < bestSqr)
@@ -106,6 +118,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                         Position     = liveShrine.transform.position,
                         Rotation     = liveShrine.transform.rotation,
                         LiveInstance = liveShrine,
+                        Group        = liveShrine.GetGroup(),
+                        IsGroupParent = liveShrine.IsGroupParent(),
                     };
                 }
                 else
@@ -117,6 +131,8 @@ namespace VerdantsAscent.Modules.Wayshrines
                         Position     = entry.Position,
                         Rotation     = entry.Rotation,
                         LiveInstance = null,
+                        Group        = entry.Group ?? "",
+                        IsGroupParent = entry.IsGroupParent,
                     };
                 }
             }

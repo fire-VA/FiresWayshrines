@@ -195,6 +195,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         public const string ZdoAutoDiscover    = "VAWayshrine_autoDiscover";    // bool
         public const string ZdoAdminOnly       = "VAWayshrine_adminOnly";       // bool
         public const string ZdoDiscoveryEpoch  = "VAWayshrine_epoch";           // int; bumped on map-marker wipe
+        public const string ZdoGroup           = "VAWayshrine_group";           // string; "" = world network
+        public const string ZdoGroupParent     = "VAWayshrine_groupParent";     // bool; group gateway, also on the world network
 
         private ZDO Zdo => (_nview != null && _nview.IsValid()) ? _nview.GetZDO() : null;
 
@@ -211,12 +213,16 @@ namespace VerdantsAscent.Modules.Wayshrines
         public bool GetAutoDiscover()      { var z = Zdo; return z != null && z.GetBool(ZdoAutoDiscover, false); }
         public bool GetAdminOnly()         { var z = Zdo; return z != null && z.GetBool(ZdoAdminOnly, false); }
         public int  GetEpoch()             { var z = Zdo; return z == null ? 0 : z.GetInt(ZdoDiscoveryEpoch, 0); }
+        public string GetGroup()           { var z = Zdo; return z == null ? "" : WayshrineGroups.Normalize(z.GetString(ZdoGroup, "")); }
+        public bool IsGroupParent()        { var z = Zdo; return z != null && z.GetBool(ZdoGroupParent, false); }
 
         public void SetCostOverride(int coins)   => WriteOwned(z => z.Set(ZdoCostOverride, Mathf.Max(0, coins)));
         public void ClearCostOverride()          => WriteOwned(z => z.Set(ZdoCostOverride, -1));
         public void SetCooldownSeconds(float s)  => WriteOwned(z => z.Set(ZdoCooldownSeconds, Mathf.Max(0f, s)));
         public void SetAutoDiscover(bool on)     => WriteOwned(z => z.Set(ZdoAutoDiscover, on));
         public void SetAdminOnly(bool on)        => WriteOwned(z => z.Set(ZdoAdminOnly, on));
+        public void SetGroup(string group)       => WriteOwned(z => z.Set(ZdoGroup, WayshrineGroups.Normalize(group)));
+        public void SetGroupParent(bool on)      => WriteOwned(z => z.Set(ZdoGroupParent, on));
 
         /// <summary>Server/host: bump the discovery epoch so every client resets its marker for this shrine
         /// (online clients via the wipe broadcast, offline clients via the login epoch-compare).</summary>
@@ -275,11 +281,16 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             string line = $"<color=#FFD966>{name}</color>\n[<color=yellow><b>{useKey}</b></color>] Activate Wayshrine";
             if (IsLocalPlayerAdmin())
-                line += "\n<size=80%><color=#888>Admin: hold Alt + right-click for shrine options</color></size>";
+                line += $"\n<size=80%><color=#888>Network: {WayshrineGroups.Describe(GetGroup(), IsGroupParent())}\n" +
+                        "Admin: hold Alt + right-click for shrine options</color></size>";
             return line;
         }
 
         public string GetHoverName() => DisplayName;
+
+        // Valheim 1.0 added GetHoverOffset to the Hoverable interface; it is ADDED to
+        // Player.m_maxInteractDistance, so 0 preserves the previous interact range exactly.
+        public float GetHoverOffset() => 0f;
 
         // ---------------- Interactable ----------------
 

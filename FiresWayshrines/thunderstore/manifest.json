@@ -1,0 +1,9 @@
+{
+  "name": "FiresWayshrines",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/fire-VA/FiresWayshrines",
+  "description": "Buildable wayshrine teleport network for Valheim. Part of the Fires mod family.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2202"
+  ]
+}

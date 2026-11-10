@@ -54,7 +54,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             foreach (var s in EnumerateDiscovered(player))
             {
                 if (accept != null && !accept(s)) continue;
-                Vector3 d = s.Position - from; d.y = 0f;
+                Vector3 d = Ring.Reach(s.Position - from, from);   // XZ; halo ring: 3D
                 float sqr = d.sqrMagnitude;
                 if (sqr < bestSqr)
                 {

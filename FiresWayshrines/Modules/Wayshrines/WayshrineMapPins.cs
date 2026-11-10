@@ -121,8 +121,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// </summary>
         public static void RebuildPinsForLocalPlayer()
         {
-            // DIAG (login-freeze investigation): per-section ENTER/EXIT so a repro
-            // log pinpoints which step is hung. Verbose-gated via FiresLogger.
+            // Verbose-only per-section ENTER/EXIT trace so a log
+            // pinpoints which step stalls.
             FiresLogger.LogVerbose($"[WayshrineMapPins][DIAG] RebuildPinsForLocalPlayer: ENTER (existing pins={_pinByShrineId.Count})");
 
             // Clear all our previous pins from the map.

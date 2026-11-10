@@ -1,4 +1,9 @@
-* v1.1.7 - updated for Valheim 1.0
+## 1.2.5
+- Cleaner settings screen: tuning options are under Show Advanced and debug logging is hidden (your saved values are kept).
 
-* v1.1.6 - maintenance and fixes
+## 1.2.4
+- Fixes and improvements.
+- Needs Fires Unified Core 0.2.550.
 
+## 1.2.3
+- Updated for Valheim 1.0, with fixes and improvements.

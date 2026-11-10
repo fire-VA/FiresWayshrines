@@ -34,6 +34,9 @@ namespace VerdantsAscent.Modules.Wayshrines
             new Dictionary<string, List<TeleporterPin>>(StringComparer.OrdinalIgnoreCase);
         private static bool _loaded;
         private static float _nextStaleCheck;
+
+        // How often (seconds) the hub config files are checked for edits on disk.
+        private const float StaleCheckInterval = 5f;
         private static DateTime _seenWrite = DateTime.MinValue;
 
         public static IEnumerable<string> ProfileNames { get { EnsureLoaded(); return _profiles.Keys; } }
@@ -82,12 +85,12 @@ namespace VerdantsAscent.Modules.Wayshrines
         {
             if (_loaded && Time.unscaledTime >= _nextStaleCheck)
             {
-                _nextStaleCheck = Time.unscaledTime + 5f;
+                _nextStaleCheck = Time.unscaledTime + StaleCheckInterval;
                 if (NewestWrite() > _seenWrite) _loaded = false;
             }
             if (_loaded) return;
             _loaded = true;
-            _nextStaleCheck = Time.unscaledTime + 5f;
+            _nextStaleCheck = Time.unscaledTime + StaleCheckInterval;
             _profiles.Clear();
             SeedExample();
 

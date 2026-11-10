@@ -51,7 +51,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                     continue;
 
                 Vector3 d = s.transform.position - worldPos;
-                d.y = 0f; // XZ only
+                d = Ring.Reach(d, worldPos); // XZ only (halo ring: 3D)
                 float sqr = d.sqrMagnitude;
                 if (sqr < bestSqr)
                 {

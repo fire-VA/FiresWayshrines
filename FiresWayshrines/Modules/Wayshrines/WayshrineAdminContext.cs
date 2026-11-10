@@ -16,6 +16,10 @@ namespace VerdantsAscent.Modules.Wayshrines
     /// </summary>
     public sealed class WayshrineAdminContextProvider : IContextMenuProvider
     {
+        // Character limits for the admin text prompts.
+        private const int TriggerSizeInputLength = 24;
+        private const int NumberInputLength = 8;
+
         public string TitleFor(ContextTarget target)
         {
             var shrine = target?.Find<Wayshrine>();
@@ -76,7 +80,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                     Toast($"Trigger size: {x:0.#} × {y:0.#} × {z:0.#} m");
                 }
                 else Toast("Enter three numbers: X Y Z (metres).");
-            }), "Trigger box size — X Y Z in metres", 24);
+            }), "Trigger box size — X Y Z in metres", TriggerSizeInputLength);
         }
 
         // ---------------- actions ----------------
@@ -85,7 +89,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         {
             if (TextInput.instance == null) { Toast("TextInput unavailable."); return; }
             // Wayshrine is itself a TextReceiver; SetText routes to RenameByAdmin (admin-guarded).
-            TextInput.instance.RequestText(shrine, $"Rename Wayshrine ({shrine.DisplayName})", 40);
+            TextInput.instance.RequestText(shrine, $"Rename Wayshrine ({shrine.DisplayName})", Wayshrine.MaxNameLength);
         }
 
         private static void PromptCost(Wayshrine shrine)
@@ -102,7 +106,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                     Toast(coins == 0 ? "Teleport cost: free" : $"Teleport cost: {coins} coins");
                 }
                 else Toast("Enter a whole number ≥ 0 (blank = auto, 0 = free).");
-            }), "Teleport cost in coins  (blank = auto, 0 = free)", 8);
+            }), "Teleport cost in coins  (blank = auto, 0 = free)", NumberInputLength);
         }
 
         private static void PromptCooldown(Wayshrine shrine)
@@ -119,7 +123,7 @@ namespace VerdantsAscent.Modules.Wayshrines
                     Toast(sec <= 0f ? "Cooldown: none" : $"Cooldown: {Mathf.RoundToInt(sec)}s per player");
                 }
                 else Toast("Enter seconds ≥ 0 (0 = none).");
-            }), "Per-player cooldown in seconds  (0 = none)", 8);
+            }), "Per-player cooldown in seconds  (0 = none)", NumberInputLength);
         }
 
         private static void ToggleAutoDiscover(Wayshrine shrine)

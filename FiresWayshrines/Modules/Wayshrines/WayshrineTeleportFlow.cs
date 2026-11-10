@@ -127,7 +127,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             string costLine = waived
                 ? "<color=#88ff88>Free (creative mode)</color>"
                 : $"Cost: <color=#FFAA33>{cost} coins</color>";
-            string mult = multiplier > 1.01f
+            string mult = multiplier > CooldownDisplayThreshold
                 ? $"<size=80%><color=#888>{km:F2} km · cooldown x{multiplier:F1}</color></size>"
                 : $"<size=80%><color=#888>{km:F2} km</color></size>";
             return $"Travel to <color=#FFD966>{destName}</color>?\n\n{costLine}\n{mult}";
@@ -282,7 +282,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             }
             double now = ZNet.instance != null ? ZNet.instance.GetTimeSeconds() : Time.time;
             WayshrineDiscovery.RecordTeleport(player, now);
-            player.TeleportTo(destPos + Vector3.up * 1.0f, destRot, distantTeleport: true);
+            player.TeleportTo(destPos + Ring.Up(destPos) * FreeTeleportLift, destRot, distantTeleport: true);   // halo ring: lift along the local up
             FiresLogger.LogInfo($"[Wayshrine] Free teleport via {label}");
             return true;
         }
@@ -341,6 +341,20 @@ namespace VerdantsAscent.Modules.Wayshrines
         private const float OnTerrainTolerance = 1f;
         private const float ArrivalSettleTimeoutSeconds = 30f;
 
+        // Small lifts above the chosen ground so the player never spawns clipped into it.
+        private const float FreeTeleportLift = 1.0f;
+        private const float LandingLift = 0.5f;
+        private const float SettleLift = 0.1f;
+        private const float LiquidProbeLift = 0.1f;
+
+        // Standing-room check: a capsule from ankle to head height must be clear of solid geometry.
+        private const float HeadroomCapsuleBottom = 0.4f;
+        private const float HeadroomCapsuleTop = 1.7f;
+        private const float HeadroomCapsuleRadius = 0.4f;
+
+        // Only show the cooldown multiplier in the prompt once it is noticeably above 1x.
+        private const float CooldownDisplayThreshold = 1.01f;
+
         /// <summary>
         /// Where the player lands. Loaded destination: a safe spot in the 2-12 m ring (see FindSafeRingSpot).
         /// Unloaded destination: there are no colliders yet, so aim at the spot in front of the shrine at the shrine's
@@ -356,7 +370,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             Vector3 front = FrontOfShrine(center, facing);
             Vector3 chosen = loaded && TryFindSafeRingSpot(center, out Vector3 ring) ? ring : front;
             rot = FaceAway(center, chosen, facing);
-            return chosen + Vector3.up * 0.5f;
+            return chosen + Ring.Up(chosen) * LandingLift;   // halo ring: lift along the local up
         }
 
         private static System.Collections.IEnumerator SettleOntoRingAfterArrival(Player player, string shrineId)
@@ -374,7 +388,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             Vector3 center = arrived.transform.position;
             if (!TryFindSafeRingSpot(center, out Vector3 ring)) yield break;
-            player.transform.position = ring + Vector3.up * 0.1f;
+            player.transform.position = ring + Ring.Up(ring) * SettleLift;   // halo ring: lift along the local up
             player.transform.rotation = FaceAway(center, ring, arrived.transform.rotation);
         }
 
@@ -389,19 +403,23 @@ namespace VerdantsAscent.Modules.Wayshrines
         {
             int floorMask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain");
             int wallMask = LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
-            Vector3 shrineEye = center + Vector3.up * EyeHeight;
+            // halo ring: the 2-12 m ring lies in the tangent plane at the shrine and every probe runs along the local up there;
+            // off the ring up = Vector3.up and this is the old world-y search exactly
+            bool onRing = Ring.InField(center);
+            Vector3 up = Ring.Up(center);
+            Vector3 shrineEye = center + up * EyeHeight;
             for (int attempt = 0; attempt < LandAttempts; attempt++)
             {
-                Vector3 ring = center + RandomRingOffset();
-                Vector3 probe = new Vector3(ring.x, center.y + LandProbeAbove, ring.z);
-                if (!Physics.Raycast(probe, Vector3.down, out RaycastHit hit, LandProbeAbove + LandProbeBelow, floorMask, QueryTriggerInteraction.Ignore))
+                Vector3 ring = center + Ring.Local(RandomRingOffset(), center);
+                Vector3 probe = onRing ? ring + up * LandProbeAbove : new Vector3(ring.x, center.y + LandProbeAbove, ring.z);
+                if (!Physics.Raycast(probe, -up, out RaycastHit hit, LandProbeAbove + LandProbeBelow, floorMask, QueryTriggerInteraction.Ignore))
                     continue;
                 if (hit.collider.attachedRigidbody != null)
                     continue;
                 Vector3 ground = hit.point;
-                if (Physics.Linecast(shrineEye, ground + Vector3.up * EyeHeight, wallMask, QueryTriggerInteraction.Ignore))
+                if (Physics.Linecast(shrineEye, ground + up * EyeHeight, wallMask, QueryTriggerInteraction.Ignore))
                     continue;
-                if (IsHazardous(ground) || !HasHeadroom(ground))
+                if ((!onRing && IsHazardous(ground)) || !HasHeadroom(ground, up))   // no water / lava / heightmap on the ring wall
                     continue;
                 spot = ground;
                 return true;
@@ -419,22 +437,20 @@ namespace VerdantsAscent.Modules.Wayshrines
 
         private static Vector3 FrontOfShrine(Vector3 center, Quaternion facing)
         {
-            Vector3 forward = facing * Vector3.forward;
-            forward.y = 0f;
+            Vector3 forward = Ring.Flat(facing * Vector3.forward, center);   // halo ring: the tangent plane
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
             return center + forward.normalized * LandMinRadius;
         }
 
         private static Quaternion FaceAway(Vector3 center, Vector3 spot, Quaternion fallback)
         {
-            Vector3 outward = spot - center;
-            outward.y = 0f;
-            return outward.sqrMagnitude > 0.01f ? Quaternion.LookRotation(outward.normalized) : fallback;
+            Vector3 outward = Ring.Flat(spot - center, center);   // halo ring: the tangent plane, upright about the local up
+            return outward.sqrMagnitude > 0.01f ? Quaternion.LookRotation(outward.normalized, Ring.Up(center)) : fallback;
         }
 
         private static bool IsHazardous(Vector3 ground)
         {
-            if (Floating.GetLiquidLevel(ground + Vector3.up * 0.1f) > ground.y + WadeDepth)
+            if (Floating.GetLiquidLevel(ground + Vector3.up * LiquidProbeLift) > ground.y + WadeDepth)
                 return true;
             var zones = ZoneSystem.instance;
             if (zones == null || !zones.GetGroundHeight(ground, out float terrain) || Mathf.Abs(ground.y - terrain) > OnTerrainTolerance)
@@ -442,10 +458,10 @@ namespace VerdantsAscent.Modules.Wayshrines
             return zones.IsLava(ground);
         }
 
-        private static bool HasHeadroom(Vector3 ground)
+        private static bool HasHeadroom(Vector3 ground, Vector3 up)
         {
             int mask = LayerMask.GetMask("Default", "static_solid", "piece");
-            return !Physics.CheckCapsule(ground + Vector3.up * 0.4f, ground + Vector3.up * 1.7f, 0.4f, mask, QueryTriggerInteraction.Ignore);
+            return !Physics.CheckCapsule(ground + up * HeadroomCapsuleBottom, ground + up * HeadroomCapsuleTop, HeadroomCapsuleRadius, mask, QueryTriggerInteraction.Ignore);
         }
     }
 }

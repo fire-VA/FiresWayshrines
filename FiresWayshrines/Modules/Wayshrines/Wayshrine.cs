@@ -39,6 +39,12 @@ namespace VerdantsAscent.Modules.Wayshrines
         private float _proximityTimer;
         private const float ProximityCheckInterval = 1f;
 
+        // Fallback discovery range (metres) before the config is bound.
+        private const float DefaultDiscoveryRange = 20f;
+
+        /// <summary>Longest display name a shrine accepts; renames are cut to this length.</summary>
+        internal const int MaxNameLength = 40;
+
         public string ShrineId { get; private set; }
 
         public string DisplayName
@@ -108,9 +114,8 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (player == null) return;
             if (player.IsDead() || player.InCutscene()) return;
 
-            float range = WayshrineConfig.DiscoveryRange?.Value ?? 20f;
-            Vector3 d = transform.position - player.transform.position;
-            d.y = 0f;
+            float range = WayshrineConfig.DiscoveryRange?.Value ?? DefaultDiscoveryRange;
+            Vector3 d = Ring.Reach(transform.position - player.transform.position, transform.position);   // halo ring: 3D on the wall
             if (d.sqrMagnitude > range * range) return;
 
             if (WayshrineDiscovery.MarkDiscovered(player, ShrineId, GetEpoch()))
@@ -255,7 +260,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (_nview == null || _nview.GetZDO() == null || _piece == null) return;
             if (string.IsNullOrWhiteSpace(newName)) return;
             string trimmed = newName.Trim();
-            if (trimmed.Length > 40) trimmed = trimmed.Substring(0, 40);
+            if (trimmed.Length > MaxNameLength) trimmed = trimmed.Substring(0, MaxNameLength);
 
             _nview.ClaimOwnership();
             WriteFieldOverride(_nview.GetZDO(), trimmed);
@@ -367,12 +372,12 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// to true and only flips false once a client RECEIVES a config sync.
         /// Our own ConfigSync syncs nothing, so its <c>isSourceOfTruth</c> stays
         /// true on every dedicated client — making our <c>IsAdmin</c> return true
-        /// for EVERYONE (the bug: non-admins saw the admin hint/menu and admin-only
+        /// for EVERYONE (non-admins would see the admin hint/menu and admin-only
         /// shrines). Core's ConfigSync registers real synced/locking config, so its
         /// <c>isSourceOfTruth</c> flips correctly, and admin status (<c>lockExempt</c>,
-        /// a static field) is pushed family-wide by Core's <c>AdminSyncing</c>.
-        /// Now delegates to the ONE canonical family check, <c>FiresCore.Sync.AdminSyncing.IsLocalAdmin</c>
-        /// (IsServer + LocalPlayerIsAdminOrHost + lockExempt union), instead of this mod's own combination.
+        /// a static field) is pushed to every mod by Core's <c>AdminSyncing</c>.
+        /// Delegates to the shared check, <c>FiresCore.Sync.AdminSyncing.IsLocalAdmin</c>
+        /// (IsServer + LocalPlayerIsAdminOrHost + lockExempt union).
         /// </summary>
         internal static bool IsLocalPlayerAdmin() => FiresCore.Sync.AdminSyncing.IsLocalAdmin();
     }

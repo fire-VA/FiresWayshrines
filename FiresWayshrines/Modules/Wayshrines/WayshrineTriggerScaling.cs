@@ -16,6 +16,9 @@ namespace VerdantsAscent.Modules.Wayshrines
     {
         private const float MinScale = 0.5f, MaxScale = 64f;
 
+        // Fraction the trigger box grows or shrinks per scroll notch.
+        private const float ScaleStep = 0.1f;
+
         // Last-used size; kept across placements so consecutive boxes match. Default equals the prefab's scale.
         internal static Vector3 CurrentScale = new Vector3(2f, 3f, 2f);
 
@@ -44,7 +47,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
                     float scroll = ZInput.GetMouseScrollWheel();
                     if (Mathf.Abs(scroll) > 0.001f)
-                        CurrentScale = Clamp(CurrentScale * (1f + Mathf.Sign(scroll) * 0.1f));
+                        CurrentScale = Clamp(CurrentScale * (1f + Mathf.Sign(scroll) * ScaleStep));
                 }
                 ghost.transform.localScale = CurrentScale;
             }

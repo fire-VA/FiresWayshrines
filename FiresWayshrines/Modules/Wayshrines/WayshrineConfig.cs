@@ -31,6 +31,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
         // --- Logging ---
         public static ConfigEntry<bool> VerboseLogging;
+        public static ConfigEntry<bool> SpreadShrineScan;
 
         public static void Bind(ConfigFile cfg)
         {
@@ -42,34 +43,35 @@ namespace VerdantsAscent.Modules.Wayshrines
             const string SEC_MAP = "Wayshrines.Map";
 
             VerboseLogging = cfg.Bind(SEC_GENERAL, "Verbose Logging", false,
-                "Enable verbose diagnostic logging (sync/pin-rebuild/registration traces).");
+                Hid("Write extra debug lines to the log."));
+            SpreadShrineScan = cfg.Bind(SEC_GENERAL, "Spread shrine scan over frames", true,
+                Adv("Perf (server/host): the 5 s shrine list refresh walks the world over several frames (about 1 ms each) instead of in one frame. Off = the old one-frame scan."));
 
             DiscoveryRange = cfg.Bind(SEC_DISCO, "DiscoveryRange", 20f,
-                "Distance (in meters) at which a player automatically discovers a wayshrine they walk near.");
+                Adv("How close (meters) you must walk to a wayshrine to discover it."));
 
             CoinsPerMeter = cfg.Bind(SEC_COST, "CoinsPerMeter", 0.25f,
-                "Base coin cost per meter of travel. 0.25 = 1 km costs 250 coins, 4 km costs 1000.");
+                Adv("Coins per meter of travel. 0.25 means 1 km costs 250 coins."));
             MinimumCost = cfg.Bind(SEC_COST, "MinimumCost", 25,
-                "Minimum coin cost for any teleport, regardless of distance.");
+                Adv("Lowest coin cost for any teleport."));
             WaiveCostInCreative = cfg.Bind(SEC_COST, "WaiveCostInCreative", true,
-                "If true, NoCraftCost (creative-mode) global key disables the coin cost.");
+                Vis("Teleports are free when the no-crafting-cost world setting is on."));
 
             CooldownWindowSeconds = cfg.Bind(SEC_COOLDOWN, "WindowSeconds", 600f,
-                "Sliding window (in seconds) within which recent teleports raise the cost multiplier.");
+                Adv("Seconds during which recent teleports make the next one cost more."));
+            // multiplier = 1 + count^exponent; 1.5 gives 1st free, 2nd ~2x, 3rd ~3.8x, 4th ~6.2x, 5th ~9x.
             CooldownExponent = cfg.Bind(SEC_COOLDOWN, "Exponent", 1.5f,
-                "Exponent applied to recent-teleport count: multiplier = 1 + (count ^ exponent). " +
-                "Default 1.5 -> 1st free, 2nd ~2x, 3rd ~3.8x, 4th ~6.2x, 5th ~9x.");
+                Adv("How fast the cost rises with repeated teleports. Higher rises faster."));
 
             RespectNoTeleportItems = cfg.Bind(SEC_RULES, "RespectNoTeleportItems", true,
-                "If true, carrying an unteleportable item (ore etc.) blocks wayshrine use, like vanilla portals.");
+                Vis("Block wayshrines while carrying items portals refuse, such as ore."));
             RespectNoPortalsKey = cfg.Bind(SEC_RULES, "RespectNoPortalsKey", true,
-                "If true, the NoPortals world-modifier global key disables wayshrines too.");
+                Vis("Disable wayshrines when the world's no-portals setting is on."));
             RespectBossLockout = cfg.Bind(SEC_RULES, "RespectBossLockout", true,
-                "If true, NoBossPortals + active boss event blocks wayshrines.");
+                Vis("Block wayshrines during a boss fight when the world's no-boss-portals setting is on."));
 
             ShowUndiscoveredAsLocked = cfg.Bind(SEC_MAP, "ShowUndiscoveredAsLocked", false,
-                "If true, undiscovered wayshrines show as faded locked icons on the map. " +
-                "If false (default), undiscovered wayshrines are completely hidden.");
+                Vis("Show undiscovered wayshrines on the map as faded locked icons instead of hiding them."));
 
             // Live-toggle: when the player flips the config in the BepInEx
             // ConfigManager UI mid-session, rebuild pins immediately so
@@ -83,5 +85,15 @@ namespace VerdantsAscent.Modules.Wayshrines
                 }
             };
         }
+
+        // Player-facing settings show normally; tuning knobs sit under Configuration Manager's advanced view;
+        // debug switches are hidden from it entirely but still live in the .cfg file.
+        private static ConfigDescription Vis(string d) => new ConfigDescription(d);
+
+        private static ConfigDescription Adv(string d) =>
+            new ConfigDescription(d, null, new ConfigurationManagerAttributes { IsAdvanced = true });
+
+        private static ConfigDescription Hid(string d) =>
+            new ConfigDescription(d, null, new ConfigurationManagerAttributes { Browsable = false });
     }
 }

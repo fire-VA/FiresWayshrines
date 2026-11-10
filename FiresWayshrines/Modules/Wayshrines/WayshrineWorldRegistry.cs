@@ -73,13 +73,68 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (ZNet.instance != null && !ZNet.instance.IsServer())
                 return _cache;
 
-            if (Time.realtimeSinceStartup - _cacheTimestamp > CacheTTLSeconds || _cache.Count == 0)
-                Refresh();
+            // 1.2.11: on a big world (VA DN, 7.7 M objects) one scan is ~450 ms, and the 5 s settings guard hit it every pass. Now the
+            // timed refresh runs over several frames (~1 ms each) and callers keep the last list meanwhile; the first scan and an
+            // Invalidate (admin edit, revert) stay immediate. A world with no shrines no longer rescans on every call (_scanned).
+            bool spread = WayshrineConfig.SpreadShrineScan == null || WayshrineConfig.SpreadShrineScan.Value;
+            if (!_scanned || _forceNow || !spread)
+            {
+                if (!_scanned || _forceNow || Time.realtimeSinceStartup - _cacheTimestamp > CacheTTLSeconds || _cache.Count == 0)
+                    Refresh();
+            }
+            else if (Time.realtimeSinceStartup - _cacheTimestamp > CacheTTLSeconds && !_bgRunning && ZNet.instance != null)
+                ZNet.instance.StartCoroutine(RefreshSpread());
             return _cache;
         }
 
         /// <summary>Force the next <see cref="GetAll"/> call to rescan.</summary>
-        public static void Invalidate() => _cacheTimestamp = 0f;
+        public static void Invalidate() { _cacheTimestamp = 0f; _forceNow = true; }
+
+        private static bool _scanned, _forceNow, _bgRunning, _bgStale;
+        private static float _nextScanReport;
+        private const double SpreadBudgetMs = 1.0;
+
+        // the timed refresh, a slice per frame: vanilla's iterative prefab scan does 400 sectors a call, so calls run until ~1 ms
+        // is spent and the rest waits for the next frame. The finished list replaces the cache in one go.
+        private static System.Collections.IEnumerator RefreshSpread()
+        {
+            _bgRunning = true; _bgStale = false;
+            var sw = new System.Diagnostics.Stopwatch();
+            var found = new List<ZDO>(); var prefabs = new List<string>(); var temp = new List<ZDO>();
+            int frames = 0; double worst = 0, total = 0;
+            try
+            {
+                foreach (var prefabName in PrefabNames)
+                {
+                    temp.Clear();
+                    int index = 0;
+                    bool done = false;
+                    while (!done)
+                    {
+                        sw.Restart();
+                        while (sw.Elapsed.TotalMilliseconds < SpreadBudgetMs)
+                        {
+                            if (ZDOMan.instance == null) yield break;
+                            if (ZDOMan.instance.GetAllZDOsWithPrefabIterative(prefabName, temp, ref index)) { done = true; break; }
+                        }
+                        double ms = sw.Elapsed.TotalMilliseconds; total += ms; if (ms > worst) worst = ms;
+                        if (!done) { frames++; yield return null; }
+                    }
+                    for (int i = 0; i < temp.Count; i++) { found.Add(temp[i]); prefabs.Add(prefabName); }
+                }
+                if (_bgStale || _forceNow) yield break;   // an immediate rescan ran meanwhile; it is newer
+                _cache.Clear();
+                for (int i = 0; i < found.Count; i++) AddEntry(found[i], prefabs[i]);
+                _cacheTimestamp = Time.realtimeSinceStartup;
+                float now = Time.realtimeSinceStartup;
+                if (now >= _nextScanReport)
+                {
+                    _nextScanReport = now + 60f;
+                    FiresWayshrines.FiresWayshrinesPlugin.Log?.LogDebug($"[Wayshrine] shrine list refreshed over {frames + 1} frame(s): {_cache.Count} shrine(s), worst slice {worst:0.00} ms, {total:0.0} ms in all ([General] Spread shrine scan over frames = on)");
+                }
+            }
+            finally { _bgRunning = false; }
+        }
 
         /// <summary>
         /// Replace the cache with a server-provided shrine list. Called by
@@ -123,6 +178,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             _cache.Clear();
             _cacheTimestamp = Time.realtimeSinceStartup;
             if (ZDOMan.instance == null) return;
+            _scanned = true; _forceNow = false; _bgStale = true;
 
             var temp = new List<ZDO>();
             foreach (var prefabName in PrefabNames)
@@ -132,9 +188,14 @@ namespace VerdantsAscent.Modules.Wayshrines
                 // Iterative API: returns true when finished. Loop until done.
                 while (!ZDOMan.instance.GetAllZDOsWithPrefabIterative(prefabName, temp, ref index)) { }
 
-                foreach (var zdo in temp)
+                foreach (var zdo in temp) AddEntry(zdo, prefabName);
+            }
+        }
+
+        private static void AddEntry(ZDO zdo, string prefabName)
+        {
                 {
-                    if (zdo == null || !zdo.IsValid()) continue;
+                    if (zdo == null || !zdo.IsValid()) return;
                     var pos = zdo.GetPosition();
                     var rot = zdo.GetRotation();
                     string name = zdo.GetString("Piece.m_name");
@@ -157,7 +218,6 @@ namespace VerdantsAscent.Modules.Wayshrines
                         IsGroupParent = zdo.GetBool(Wayshrine.ZdoGroupParent, false),
                     });
                 }
-            }
         }
 
         /// <summary>
@@ -174,14 +234,13 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// position). Running the prune there sees a tiny slice of the world,
         /// concludes that every discovered shrine outside those few zones no
         /// longer exists, and silently wipes the player's discovery list —
-        /// which then persists to disk on the next save. That's the "no map
-        /// markers after relog" report.
+        /// which then persists to disk on the next save.
         ///
         /// Hammer-destruction by the local player is handled live by
         /// <see cref="Wayshrine.CleanupOnDestruction"/> (calls
         /// <see cref="WayshrineDiscovery.RemoveDiscovered"/>). Destruction by
-        /// another peer while we were offline is the only edge case this
-        /// prune was originally designed to catch, and we now handle that
+        /// another peer while we were offline is the only case this
+        /// prune would catch, and that is handled
         /// lazily: a teleport attempt to a missing shrine prompts the user
         /// and removes the entry on demand. Better to keep stale ids than to
         /// nuke real ones.

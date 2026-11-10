@@ -57,7 +57,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
             Wayshrine shrine = WayshrineRegistry.FindClosest(worldPos, pickRadius);
             if (shrine == null) return true; // not on a wayshrine — vanilla can handle the click
 
-            // Wayshrine.IsLocalPlayerAdmin uses the mod's own admin-sync RPC, not
+            // Wayshrine.IsLocalPlayerAdmin uses Core's shared admin sync, not
             // ZNet.LocalPlayerIsAdminOrHost — vanilla's check returns false on
             // dedicated clients because m_adminList is server-only.
             bool admin = Wayshrine.IsLocalPlayerAdmin();
@@ -67,7 +67,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
             {
                 if (TextInput.instance != null)
                 {
-                    TextInput.instance.RequestText(shrine, $"Rename Wayshrine ({shrine.DisplayName})", 40);
+                    TextInput.instance.RequestText(shrine, $"Rename Wayshrine ({shrine.DisplayName})", Wayshrine.MaxNameLength);
                     FiresLogger.LogInfo($"[Wayshrine] Opened admin rename dialog for '{shrine.DisplayName}' (id={shrine.ShrineId})");
                 }
                 else
@@ -102,6 +102,9 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
 
     internal static class MinimapPatchUtil
     {
+        // Map-pin click radius scales with zoom; this widens it so a shrine icon is easy to hit.
+        private const float PickRadiusZoomFactor = 2f;
+
         public static Vector3 ScreenToWorld(Minimap mm, Vector3 mousePos)
         {
             return Traverse.Create(mm).Method("ScreenToWorldPoint", new object[] { mousePos })
@@ -111,7 +114,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         public static float PickRadius(Minimap mm)
         {
             float largeZoom = Traverse.Create(mm).Field("m_largeZoom").GetValue<float>();
-            return mm.m_removeRadius * (largeZoom * 2f);
+            return mm.m_removeRadius * (largeZoom * PickRadiusZoomFactor);
         }
     }
 }

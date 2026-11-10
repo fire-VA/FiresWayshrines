@@ -13,18 +13,17 @@ namespace VerdantsAscent.Modules.Wayshrines
     /// ---------------
     /// On a dedicated client, <see cref="ZDOMan"/> only contains ZDOs that have
     /// streamed to the local peer — typically a few zones around the player's
-    /// current position. The previous client-side
-    /// <see cref="WayshrineWorldRegistry.Refresh"/> walked
-    /// <c>ZDOMan.GetAllZDOsWithPrefabIterative</c>, which on dedicated returned
-    /// only the tiny streamed slice. That broke two flows:
+    /// current position. A client-side
+    /// <see cref="WayshrineWorldRegistry.Refresh"/> walking
+    /// <c>ZDOMan.GetAllZDOsWithPrefabIterative</c> would see only that
+    /// small streamed slice, which breaks two flows:
     ///
-    ///   1. <see cref="WayshrineMapPins.RebuildPinsForLocalPlayer"/> — couldn't
+    ///   1. <see cref="WayshrineMapPins.RebuildPinsForLocalPlayer"/> — could not
     ///      place pins for discovered shrines whose zones weren't loaded.
-    ///   2. <see cref="WayshrineWorldRegistry.PruneStaleDiscovery"/> — silently
-    ///      wiped every discovery whose shrine wasn't in the streamed window
-    ///      (the "no map markers after relog" report).
+    ///   2. <see cref="WayshrineWorldRegistry.PruneStaleDiscovery"/> — would
+    ///      wipe every discovery whose shrine is outside the streamed window.
     ///
-    /// The fix: server (always authoritative for the full ZDO map) scans its
+    /// So the server (always authoritative for the full ZDO map) scans its
     /// own ZDOMan and ships the result to clients on request. Clients apply it
     /// via <see cref="WayshrineWorldRegistry.ApplyServerList"/>, validate the
     /// player's discovery set against the authoritative list, and rebuild
@@ -61,6 +60,18 @@ namespace VerdantsAscent.Modules.Wayshrines
         private const string RPC_WayshrineWipe      = "FiresWayshrines_Wipe";          // server -> all clients
         private const string RPC_SettingsChanged    = "FiresWayshrines_SettingsChanged"; // admin client -> server
         private const float ZdoPropagationDelaySeconds = 2f;
+        private const int MaxListEntries = 4096;
+        private const int MinEntryBytes = 50;   // ZDOID 12 + vec3 12 + quat 16 + int 4 + float 4 + bools/strings
+        private const float ListRequestCooldownSeconds = 10f;
+        private static readonly Dictionary<long, float> _lastListRequest = new Dictionary<long, float>();
+
+        // Server-to-client traffic must come from the server peer (a routed RPC can be sent by any peer).
+        private static bool IsFromServer(long sender)
+        {
+            if (ZRoutedRpc.instance == null) return false;
+            long serverId = ZRoutedRpc.instance.GetServerPeerID();
+            return serverId != 0L && sender == serverId;
+        }
 
         private static bool _listBroadcastPending;
 
@@ -98,6 +109,93 @@ namespace VerdantsAscent.Modules.Wayshrines
                 RPC_SettingsChanged,
                 new System.Action<long, ZPackage>(OnSettingsChanged));
             _listBroadcastPending = false;
+            _settingsSnapshot.Clear();
+            _adminEditUntil = 0f;
+            if (ZNet.instance != null && ZNet.instance.IsServer())
+                ZNet.instance.StartCoroutine(SettingsGuardLoop());
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  Server guard for admin per-shrine settings.
+        //  The settings are ZDO fields any owner can write, so the server keeps a
+        //  snapshot and reverts changes that did not come with an admin's
+        //  SettingsChanged / wipe (an admin edit opens a short accept window).
+        // ────────────────────────────────────────────────────────────────────
+
+        private struct ShrineSettings
+        {
+            public int Cost; public float Cooldown; public bool AutoDiscover, AdminOnly, GroupParent; public int Epoch; public string Group;
+            public bool SameAs(ShrineSettings o) =>
+                Cost == o.Cost && Cooldown == o.Cooldown && AutoDiscover == o.AutoDiscover && AdminOnly == o.AdminOnly &&
+                GroupParent == o.GroupParent && Epoch == o.Epoch && string.Equals(Group ?? "", o.Group ?? "");
+        }
+
+        private const float SettingsGuardInterval = 5f;
+        private const float AdminEditWindowSeconds = 15f;
+        private static readonly Dictionary<ZDOID, ShrineSettings> _settingsSnapshot = new Dictionary<ZDOID, ShrineSettings>();
+        private static float _adminEditUntil;
+
+        private static void MarkAdminEdit() => _adminEditUntil = UnityEngine.Time.realtimeSinceStartup + AdminEditWindowSeconds;
+
+        private static ShrineSettings ReadSettings(ZDO z) => new ShrineSettings
+        {
+            Cost = z.GetInt(Wayshrine.ZdoCostOverride, -1),
+            Cooldown = z.GetFloat(Wayshrine.ZdoCooldownSeconds, 0f),
+            AutoDiscover = z.GetBool(Wayshrine.ZdoAutoDiscover, false),
+            AdminOnly = z.GetBool(Wayshrine.ZdoAdminOnly, false),
+            GroupParent = z.GetBool(Wayshrine.ZdoGroupParent, false),
+            Epoch = z.GetInt(Wayshrine.ZdoDiscoveryEpoch, 0),
+            Group = z.GetString(Wayshrine.ZdoGroup, ""),
+        };
+
+        private static void WriteSettings(ZDO z, ShrineSettings s)
+        {
+            z.Set(Wayshrine.ZdoCostOverride, s.Cost);
+            z.Set(Wayshrine.ZdoCooldownSeconds, s.Cooldown);
+            z.Set(Wayshrine.ZdoAutoDiscover, s.AutoDiscover);
+            z.Set(Wayshrine.ZdoAdminOnly, s.AdminOnly);
+            z.Set(Wayshrine.ZdoGroupParent, s.GroupParent);
+            z.Set(Wayshrine.ZdoDiscoveryEpoch, s.Epoch);
+            z.Set(Wayshrine.ZdoGroup, s.Group ?? "");
+        }
+
+        private static System.Collections.IEnumerator SettingsGuardLoop()
+        {
+            var wait = new WaitForSeconds(SettingsGuardInterval);
+            while (ZNet.instance != null && ZNet.instance.IsServer())
+            {
+                yield return wait;
+                try { GuardSettingsOnce(); }
+                catch (System.Exception ex) { FiresLogger.LogWarning($"[Wayshrine] settings guard: {ex.Message}"); }
+            }
+        }
+
+        private static void GuardSettingsOnce()
+        {
+            if (ZDOMan.instance == null) return;
+            bool accept = UnityEngine.Time.realtimeSinceStartup < _adminEditUntil;
+            var entries = WayshrineWorldRegistry.GetAll();
+            var seen = new HashSet<ZDOID>();
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var id = entries[i].Id;
+                var z = ZDOMan.instance.GetZDO(id);
+                if (z == null) continue;
+                seen.Add(id);
+                var cur = ReadSettings(z);
+                if (accept || !_settingsSnapshot.TryGetValue(id, out var snap)) { _settingsSnapshot[id] = cur; continue; }
+                if (cur.SameAs(snap)) continue;
+                FiresLogger.LogWarning($"[Wayshrine] Reverted non-admin change to shrine settings on {id} (owner {z.GetOwner()}).");
+                z.SetOwner(ZDOMan.GetSessionID());
+                WriteSettings(z, snap);
+                WayshrineWorldRegistry.Invalidate();
+            }
+            if (_settingsSnapshot.Count > seen.Count)
+            {
+                var stale = new List<ZDOID>();
+                foreach (var k in _settingsSnapshot.Keys) if (!seen.Contains(k)) stale.Add(k);
+                for (int i = 0; i < stale.Count; i++) _settingsSnapshot.Remove(stale[i]);
+            }
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -116,6 +214,7 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (ZNet.instance == null || ZRoutedRpc.instance == null) return;
             if (ZNet.instance.IsServer())
             {
+                MarkAdminEdit();
                 ScheduleListBroadcast();
                 return;
             }
@@ -127,7 +226,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static void OnSettingsChanged(long sender, ZPackage pkg)
         {
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
-            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) return;
+            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) { FiresLogger.LogWarning($"[Wayshrine] Refused settings change from non-admin {sender}."); return; }
+            MarkAdminEdit();
             ScheduleListBroadcast();
         }
 
@@ -225,7 +325,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static void OnRequestWipe(long sender, ZPackage pkg)
         {
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
-            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) return;
+            if (!FiresCore.Sync.AdminSyncing.IsAdmin(sender)) { FiresLogger.LogWarning($"[Wayshrine] Refused wipe request from non-admin {sender}."); return; }
+            MarkAdminEdit();
             var zdoid = pkg.ReadZDOID();
             var shrineId = pkg.ReadString();
             DoServerWipe(zdoid, shrineId);
@@ -281,6 +382,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static void OnWayshrineWipe(long sender, ZPackage pkg)
         {
             if (ZNet.instance == null || ZNet.instance.IsServer()) return;  // host handled itself in DoServerWipe
+            if (!IsFromServer(sender)) { FiresLogger.LogWarning($"[Wayshrine] Dropped wipe from non-server sender {sender}."); return; }
             var shrineId = pkg.ReadString();
             int epoch = pkg.ReadInt();
             ApplyWipeLocally(shrineId, epoch);
@@ -308,6 +410,16 @@ namespace VerdantsAscent.Modules.Wayshrines
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
             if (ZRoutedRpc.instance == null) return;
 
+            // Security: per-sender cooldown so a client can't force a full ZDOMan scan + serialize on every packet.
+            float now = UnityEngine.Time.realtimeSinceStartup;
+            if (_lastListRequest.TryGetValue(sender, out float last) && now - last < ListRequestCooldownSeconds)
+            {
+                FiresLogger.LogWarning($"[Wayshrine] Shrine list request from {sender} throttled.");
+                return;
+            }
+            if (_lastListRequest.Count > 512) _lastListRequest.Clear();
+            _lastListRequest[sender] = now;
+
             // Force a fresh ZDOMan scan so the response reflects current world
             // state — handy after admin renames / deletions.
             WayshrineWorldRegistry.Invalidate();
@@ -330,16 +442,16 @@ namespace VerdantsAscent.Modules.Wayshrines
             // scan. The Routed RPC infrastructure self-loops on a host so
             // without this guard we'd double-rebuild.
             if (ZNet.instance == null || ZNet.instance.IsServer()) return;
+            if (!IsFromServer(sender)) { FiresLogger.LogWarning($"[Wayshrine] Dropped shrine list from non-server sender {sender}."); return; }
 
             var entries = DeserializeEntries(responsePkg);
+            if (entries == null) { FiresLogger.LogWarning($"[Wayshrine] Dropped malformed shrine list from {sender}."); return; }
             WayshrineWorldRegistry.ApplyServerList(entries);
 
             FiresLogger.LogInfo($"[Wayshrine] Received authoritative shrine list ({entries.Count} entries) from server.");
 
-            // DIAG (login-freeze investigation): bracket ValidateAndRebuild so a
-            // repro log shows whether the freeze is inside the validate/rebuild
-            // path or in whatever runs after this RPC handler returns.
-            // Verbose-gated via FiresLogger.
+            // Verbose-only trace around ValidateAndRebuild, so a log shows whether a
+            // stall is inside the validate/rebuild path or after this handler returns.
             FiresLogger.LogVerbose("[Wayshrine][DIAG] ENTER ValidateAndRebuild");
             ValidateAndRebuild();
             FiresLogger.LogVerbose("[Wayshrine][DIAG] EXIT ValidateAndRebuild (OnShrineListResponse returning)");
@@ -348,9 +460,9 @@ namespace VerdantsAscent.Modules.Wayshrines
         // ────────────────────────────────────────────────────────────────────
         //  Common: validate discovery set + rebuild pins
         //
-        //  Now safe on every topology: PruneStaleDiscovery refuses to run on
+        //  Safe on every topology: PruneStaleDiscovery refuses to run on
         //  dedicated clients (its ZDOMan-scan is unreliable there), but with
-        //  the registry now populated server-authoritatively we can run a
+        //  the registry populated server-authoritatively we can run a
         //  parallel pruning pass right here using the freshly-applied data.
         // ────────────────────────────────────────────────────────────────────
 
@@ -492,6 +604,9 @@ namespace VerdantsAscent.Modules.Wayshrines
         private static List<WayshrineWorldRegistry.Entry> DeserializeEntries(ZPackage pkg)
         {
             int count = pkg.ReadInt();
+            // Security: clamp the wire count and make sure the package can actually hold that many entries.
+            if (count < 0 || count > MaxListEntries) return null;
+            if ((long)count * MinEntryBytes > (long)(pkg.Size() - pkg.GetPos())) return null;
             var result = new List<WayshrineWorldRegistry.Entry>(count);
             for (int i = 0; i < count; i++)
             {

@@ -19,6 +19,9 @@ namespace VerdantsAscent.Modules.Wayshrines.TownPortalScroll
     {
         public const string TownPortalScrollPrefabName = "ScrollTownPortal";
 
+        // Arrival distance (metres) in front of a loaded shrine.
+        private const float ArrivalForwardOffset = 1.5f;
+
         [HarmonyPrefix]
         private static bool Prefix(Humanoid __instance, Inventory inventory, ItemDrop.ItemData item, bool fromInventoryGui)
         {
@@ -77,7 +80,7 @@ namespace VerdantsAscent.Modules.Wayshrines.TownPortalScroll
                     var rot = n.Rotation;
                     // Pop in front of the shrine if it's loaded; warp in place
                     // if the zone isn't loaded (height already resolved).
-                    var pos = n.IsLive ? n.Position + rot * Vector3.forward * 1.5f : n.Position;
+                    var pos = n.IsLive ? n.Position + rot * Vector3.forward * ArrivalForwardOffset : n.Position;
                     if (WayshrineTeleportFlow.ExecuteFreeTeleport(pos, rot, $"scroll->{n.DisplayName}"))
                         ConsumeOne(inventory, item);
                 },

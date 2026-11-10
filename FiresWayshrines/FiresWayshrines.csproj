@@ -104,6 +104,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Ascend.cs" />
+    <Compile Include="ConfigurationManagerAttributes.cs" />
     <Compile Include="Modules\Wayshrines\Wayshrine.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineAdminContext.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineConfig.cs" />
@@ -118,6 +119,7 @@
     <Compile Include="Modules\Wayshrines\WayshrineRegistry.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineSyncRPC.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineTeleportFlow.cs" />
+    <Compile Include="Modules\Wayshrines\Ring.cs" />
     <Compile Include="Modules\Wayshrines\TeleporterHubConfig.cs" />
     <Compile Include="Modules\Wayshrines\WayshrinesApi.cs" />
     <Compile Include="Modules\Wayshrines\WayshrineHelpContent.cs" />
@@ -137,7 +139,9 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="fireswayshrines" Condition="Exists('$(MSBuildProjectDirectory)\fireswayshrines')" />
+    <!-- 1.2.12 ([fgn] VMMap 10-30: the embedded bundle sat 2-3x in RAM): shipped as a FILE next to the DLL, loaded with AssetBundle.LoadFromFile -->
+    <None Include="fireswayshrines" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="fireswayshrines" />   <!-- [lead] 10-30: kept as a FALLBACK for a pack without the side file (Warning); unused pages stay unmapped when the file loads -->
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

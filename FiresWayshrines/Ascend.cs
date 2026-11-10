@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -14,9 +14,8 @@ using FiresLogger = VerdantsAscent.FiresLogger;
 
 namespace FiresWayshrines
 {
-    // Standalone wayshrine mod: the original, working Wayshrines module (ported verbatim from the
-    // pre-refactor RPG Maker project, namespace VerdantsAscent.Modules.Wayshrines) wrapped in a thin
-    // plugin. The plugin loads the embedded bundle, hands its "Wayshrine*" prefabs to WayshrineModule,
+    // Standalone wayshrine mod: the Wayshrines module (namespace VerdantsAscent.Modules.Wayshrines, kept
+    // for save and reflection compatibility) wrapped in a thin plugin. The plugin loads the embedded bundle, hands its "Wayshrine*" prefabs to WayshrineModule,
     // and registers them into ZNetScene + the Hammer the Jotunn-free way (mirroring VAPieceManager).
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
     [BepInDependency("com.Fire.FiresUnifiedCore", "0.2.33")]
@@ -24,7 +23,7 @@ namespace FiresWayshrines
     {
         public const string PluginGUID = "com.Fire.FiresWayshrines";
         public const string PluginName = "FiresWayshrines";
-        public const string PluginVersion = "1.2.2";
+        public const string PluginVersion = "1.2.13";   // 1.2.13 ([wishbone] 11-05, Fire: name the dedi errors): dedi texture unload removed (vanilla never unloads bundle textures; it freed 0 MB and unloaded mid async upload, suspected AsyncResourceUpload failed). 1.2.12 ([wishbone]; [fgn] VMMap 10-30): the asset bundle ships as a file next to the DLL and loads with AssetBundle.LoadFromFile (no embedded copy held in RAM)
 
         private const string BundleResourceName = "fireswayshrines";
         private const float SummaryPinWaitSeconds = 10f;
@@ -57,7 +56,7 @@ namespace FiresWayshrines
             {
                 DisplayName = PluginName,
                 CurrentVersion = PluginVersion,
-                MinimumRequiredVersion = PluginVersion,
+                MinimumRequiredVersion = "1.2.3" /* fixed: raise only when a synced key's name, type or meaning changes */,
             };
 
             WayshrineModule.Init(Config);
@@ -137,9 +136,19 @@ namespace FiresWayshrines
                     return loaded;
 
             Assembly asm = Assembly.GetExecutingAssembly();
+            // 1.2.12 ([fgn] VMMap 10-30, 22 MB mapped + the byte[] copy): the bundle ships as a file next to the DLL; LoadFromFile maps
+            // it and reads lazily (no managed copy, nothing to dispose, dedi-safe). The embedded path below stays only for an old build.
+            string file = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(asm.Location) ?? "", name);
+            if (System.IO.File.Exists(file))
+            {
+                var fromFile = AssetBundle.LoadFromFile(file);
+                FiresLogger.LogInfo($"bundle '{name}' loaded from file ({new System.IO.FileInfo(file).Length / 1048576f:0.0} MB, mapped, no copy in RAM)");
+                return fromFile;
+            }
             string resourceName = Array.Find(asm.GetManifestResourceNames(),
                 n => n.EndsWith(name, StringComparison.OrdinalIgnoreCase));
             if (resourceName == null) { Debug.LogError($"[FiresWayshrines] no embedded resource ending with '{name}'"); return null; }
+            FiresLogger.LogWarning($"bundle file '{file}' missing: loading the embedded copy (whole bundle held in RAM); ship the '{name}' file next to the DLL");
 
             using (System.IO.Stream stream = asm.GetManifestResourceStream(resourceName))
             {

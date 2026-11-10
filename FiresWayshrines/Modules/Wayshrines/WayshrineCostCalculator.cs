@@ -9,6 +9,12 @@ namespace VerdantsAscent.Modules.Wayshrines
     /// </summary>
     public static class WayshrineCostCalculator
     {
+        // Fallbacks used before the config is bound; they match the config defaults.
+        private const float DefaultCoinsPerMeter = 0.25f;
+        private const int DefaultMinimumCost = 25;
+        private const float DefaultCooldownExponent = 1.5f;
+        private const float DefaultCooldownWindowSeconds = 600f;
+
         /// <summary>
         /// Computes the final coin cost for a teleport.
         /// </summary>
@@ -17,8 +23,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// <returns>Final cost in coins (already floored, never below MinimumCost).</returns>
         public static int CalculateCost(float distance, int recentTeleports)
         {
-            float coinsPerMeter = WayshrineConfig.CoinsPerMeter?.Value ?? 0.25f;
-            int minCost = WayshrineConfig.MinimumCost?.Value ?? 25;
+            float coinsPerMeter = WayshrineConfig.CoinsPerMeter?.Value ?? DefaultCoinsPerMeter;
+            int minCost = WayshrineConfig.MinimumCost?.Value ?? DefaultMinimumCost;
 
             float baseCost = distance * coinsPerMeter;
             float multiplier = CalculateMultiplier(recentTeleports);
@@ -34,7 +40,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         public static float CalculateMultiplier(int recentTeleports)
         {
             if (recentTeleports <= 0) return 1f;
-            float exponent = WayshrineConfig.CooldownExponent?.Value ?? 1.5f;
+            float exponent = WayshrineConfig.CooldownExponent?.Value ?? DefaultCooldownExponent;
             return 1f + Mathf.Pow(recentTeleports, exponent);
         }
 
@@ -44,7 +50,7 @@ namespace VerdantsAscent.Modules.Wayshrines
         /// </summary>
         public static List<double> PruneOutsideWindow(List<double> timestamps, double nowSeconds)
         {
-            float window = WayshrineConfig.CooldownWindowSeconds?.Value ?? 600f;
+            float window = WayshrineConfig.CooldownWindowSeconds?.Value ?? DefaultCooldownWindowSeconds;
             double cutoff = nowSeconds - window;
             var keep = new List<double>(timestamps.Count);
             for (int i = 0; i < timestamps.Count; i++)

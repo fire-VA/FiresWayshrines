@@ -16,7 +16,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
     /// We use <c>save: false</c> when adding pins so they don't accumulate in
     /// the map's persistent store across sessions — instead we re-add them
     /// each session, this time from a server-validated list rather than the
-    /// streamed-zone slice that produced the "no markers after relog" bug.
+    /// streamed-zone slice, which misses shrines in unloaded zones.
     /// </summary>
     [HarmonyPatch(typeof(Player), nameof(Player.OnSpawned))]
     internal static class PlayerSpawnedPinRebuildPatch
@@ -26,7 +26,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
         {
             if (__instance != Player.m_localPlayer) return;
 
-            // DIAG (login-freeze) — verbose-gated via FiresLogger.
+            // Verbose-only trace of the login path.
             FiresLogger.LogVerbose("[LoginFreeze][DIAG] ENTER PlayerSpawnedPinRebuildPatch.Postfix");
 
             // Defer one frame so Minimap.instance + ZRoutedRpc.instance are
@@ -39,7 +39,7 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
             // PlayerSpawnGate callbacks are what actually localise the freeze.
             __instance.StartCoroutine(LoginFreezeHeartbeat());
 
-            // DIAG (login-freeze) — verbose-gated via FiresLogger.
+            // Verbose-only trace of the login path.
             FiresLogger.LogVerbose("[LoginFreeze][DIAG] EXIT PlayerSpawnedPinRebuildPatch.Postfix");
         }
 
@@ -51,10 +51,9 @@ namespace VerdantsAscent.Modules.Wayshrines.Patches
 
         private static System.Collections.IEnumerator LoginFreezeHeartbeat()
         {
-            // DIAG (login-freeze investigation): minimal "main thread alive" marker.
-            // The real diagnostic value is in the ENTER/EXIT logs on each Player.OnSpawned
-            // postfix and PlayerSpawnGate.InvokeWork — those tell us WHICH call is hung.
-            // The heartbeat just bounds whether we got past 1s/5s at all.
+            // Verbose-only "main thread alive" marker after spawn. With the ENTER/EXIT
+            // lines around each spawn step it shows whether a login stall happened and
+            // roughly how long it lasted.
             FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat START (Player.OnSpawned postfix)");
             yield return new WaitForSecondsRealtime(1f);
             FiresLogger.LogVerbose("[LoginFreeze][DIAG] heartbeat +1s — main thread alive");

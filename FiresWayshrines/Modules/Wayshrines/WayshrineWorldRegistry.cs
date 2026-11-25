@@ -82,13 +82,47 @@ namespace VerdantsAscent.Modules.Wayshrines
                 if (!_scanned || _forceNow || Time.realtimeSinceStartup - _cacheTimestamp > CacheTTLSeconds || _cache.Count == 0)
                     Refresh();
             }
-            else if (Time.realtimeSinceStartup - _cacheTimestamp > CacheTTLSeconds && !_bgRunning && ZNet.instance != null)
+            else if (Time.realtimeSinceStartup - _cacheTimestamp > SpreadTTLSeconds && !_bgRunning && ZNet.instance != null)
+            {
+                Why("timed refresh (" + SpreadTTLSeconds.ToString("0") + " s since the last list)");
                 ZNet.instance.StartCoroutine(RefreshSpread());
+            }
             return _cache;
         }
 
         /// <summary>Force the next <see cref="GetAll"/> call to rescan.</summary>
         public static void Invalidate() { _cacheTimestamp = 0f; _forceNow = true; }
+
+        // 1.2.14 ([lead] profiler: ZNet.RefreshSpread 0.40-0.49 ms/frame at the dock + shore moving, FIRE_20261113_044545 / _045800). The host's 5 s
+        // settings guard called GetAll every 5 s and the 5 s TTL restarted the whole-world prefab scan (~450 ms on VA DN in 1 ms slices), so the scan
+        // ran nearly all the time; and every shrine streaming in or out called Invalidate = an immediate full scan. The shrine LIST only changes when a
+        // shrine ZDO is created or destroyed, so: a stream-in already in the list is not a change, a stream-out whose ZDO still exists (zone unload)
+        // is not a change, and the timed fallback runs every 60 s (out-of-band changes no Awake / OnDestroy saw: admin spawn far from every peer).
+        // Admin edits, reverts, hammer destruction and the sync RPC still call Invalidate (immediate). Per-shrine SETTINGS are read live from the ZDO
+        // by the guard, so its enforcement is unchanged.
+        private const float SpreadTTLSeconds = 60f;
+        public static void InvalidateIfNew(ZDOID id)
+        {
+            if (id != ZDOID.None && _scanned) { for (int i = 0; i < _cache.Count; i++) if (_cache[i].Id == id) { Skip("a listed shrine streamed in"); return; } }
+            Why("a shrine not in the list appeared"); Invalidate();
+        }
+        public static void InvalidateIfGone(ZDOID id)
+        {
+            if (id != ZDOID.None && ZDOMan.instance != null && ZDOMan.instance.GetZDO(id) != null) { Skip("a shrine streamed out (its ZDO still exists)"); return; }
+            Why("a shrine's ZDO was destroyed"); Invalidate();
+        }
+        private static int _skips; private static float _nextWhy;
+        private static void Skip(string why) { _skips++; Why(null, why); }
+        private static void Why(string ran, string skipped = null)
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now < _nextWhy) return;
+            _nextWhy = now + 30f;
+            FiresWayshrines.FiresWayshrinesPlugin.Log?.LogDebug(ran != null
+                ? $"[Wayshrine] shrine list rescan: {ran} ({_skips} stream event(s) skipped since the last line) (1.2.14)"
+                : $"[Wayshrine] shrine list kept: {skipped} ({_skips} skip(s) so far) (1.2.14)");
+            if (ran != null) _skips = 0;
+        }
 
         private static bool _scanned, _forceNow, _bgRunning, _bgStale;
         private static float _nextScanReport;

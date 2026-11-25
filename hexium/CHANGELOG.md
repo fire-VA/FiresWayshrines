@@ -1,3 +1,23 @@
+## 1.2.14
+
+### Changed
+- Smoother play: the shrine scan runs once a minute. Shrines loading in and out no longer force a full rescan; new or destroyed shrines still update at once.
+
+## 1.2.13
+
+### Fixed
+- Removed a dedicated-server texture cleanup that freed no memory and was a suspected cause of server load errors.
+
+## 1.2.12
+- The wayshrine models now load from a separate file next to the mod, using less memory; install both files together (the mod still works without it, using its built-in copy). (performance)
+
+## 1.2.11
+- Fixed a server-side check that rebuilt the shrine list every few seconds (smoother servers).
+- Wayshrines work on curved ring worlds; normal worlds are unchanged.
+
+## 1.2.9
+- Bug fixes and improvements.
+
 ## 1.2.5
 - Cleaner settings screen: tuning options are under Show Advanced and debug logging is hidden (your saved values are kept).
 

@@ -36,6 +36,7 @@ namespace VerdantsAscent.Modules.Wayshrines
 
         private Piece _piece;
         private ZNetView _nview;
+        private ZDOID _zdoId = ZDOID.None;   // 1.2.14
         private float _proximityTimer;
         private const float ProximityCheckInterval = 1f;
 
@@ -82,7 +83,9 @@ namespace VerdantsAscent.Modules.Wayshrines
 
             EnsureNameAssigned();
             WayshrineRegistry.Register(this);
-            WayshrineWorldRegistry.Invalidate();
+            // 1.2.14: a shrine streaming in that the list already holds is not a change (was a full immediate world rescan per stream-in)
+            _zdoId = _nview != null && _nview.GetZDO() != null ? _nview.GetZDO().m_uid : ZDOID.None;
+            WayshrineWorldRegistry.InvalidateIfNew(_zdoId);
 
             // Per-shrine auto-discover (admin flag): known the moment it streams in, so it's pinned +
             // usable without walking up to it (covers first-login too).
@@ -101,7 +104,8 @@ namespace VerdantsAscent.Modules.Wayshrines
         private void OnDestroy()
         {
             WayshrineRegistry.Unregister(this);
-            WayshrineWorldRegistry.Invalidate();
+            // 1.2.14: a zone unload keeps the ZDO (only a real destroy removes it): rescan only when the ZDO is gone
+            WayshrineWorldRegistry.InvalidateIfGone(_zdoId);
         }
 
         private void Update()

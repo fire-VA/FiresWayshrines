@@ -5,6 +5,12 @@
 A fast-travel network for Valheim. Discover wayshrines by finding them, then travel between any two you know
 for a coin toll.
 
+## What's new in 1.2.13
+
+- **Fixed: a possible cause of server loading errors.** On dedicated servers the mod used to try to clear the
+  wayshrine textures from memory. It freed nothing and was a likely cause of errors while the server loaded, so it
+  has been removed. Nothing changes for players.
+
 ## How it works
 
 - **Discover.** Walk within about 20 m of a wayshrine. You get "Discovered: <name>" and the shrine pins to your
@@ -49,12 +55,13 @@ sword, so in practice only admins can make it, for handing out as rewards or eve
 ## Requires
 
 - BepInExPack for Valheim
-- FiresUnifiedCore 0.2.389 or newer
+- FiresUnifiedCore 0.2.1223 or newer
 
 ## Installation
 
 Install with a mod manager, or copy the plugin folder into `BepInEx/plugins`. Install it on every client and on
-the dedicated server, so the shrine network and discoveries are shared.
+the dedicated server, so the shrine network and discoveries are shared. The wayshrine models come in a separate
+file next to the mod; keep the files together (the mod still works without it, using its built-in copy).
 
 ## Configuration
 
@@ -95,3 +102,10 @@ MIT License, Copyright (c) 2025 fire-VA. See the LICENSE file.
 ## Issues / questions
 
 https://discord.gg/zQRgHbqms4
+
+## Screenshots
+
+<!-- Image hosting is Fire's call (morning 10-20). Replace HOSTED_URL with the image host and uncomment each line. Files: Tools\readme_shots\20261020\FiresWayshrines\ -->
+<!-- ![A discovered wayshrine](HOSTED_URL/FiresWayshrines/01_shrine.png) -->
+<!-- ![Shrines on the map](HOSTED_URL/FiresWayshrines/02_map.png) -->
+<!-- ![The travel cost](HOSTED_URL/FiresWayshrines/03_travel.png) -->

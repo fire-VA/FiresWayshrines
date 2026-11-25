@@ -23,7 +23,7 @@ namespace FiresWayshrines
     {
         public const string PluginGUID = "com.Fire.FiresWayshrines";
         public const string PluginName = "FiresWayshrines";
-        public const string PluginVersion = "1.2.13";   // 1.2.13 ([wishbone] 11-05, Fire: name the dedi errors): dedi texture unload removed (vanilla never unloads bundle textures; it freed 0 MB and unloaded mid async upload, suspected AsyncResourceUpload failed). 1.2.12 ([wishbone]; [fgn] VMMap 10-30): the asset bundle ships as a file next to the DLL and loads with AssetBundle.LoadFromFile (no embedded copy held in RAM)
+        public const string PluginVersion = "1.2.14";   // 1.2.14 ([ghost], lead 11-13 profiler: RefreshSpread 0.40-0.49 ms/frame): the whole-world shrine scan reruns every 60 s (was 5 s, restarted by the host settings guard so it ran nearly always); shrines streaming in / out no longer force a full immediate rescan (only a new shrine or a destroyed ZDO does); Debug line names why it ran or skipped. // 1.2.13 ([wishbone] 11-05, Fire: name the dedi errors): dedi texture unload removed (vanilla never unloads bundle textures; it freed 0 MB and unloaded mid async upload, suspected AsyncResourceUpload failed). 1.2.12 ([wishbone]; [fgn] VMMap 10-30): the asset bundle ships as a file next to the DLL and loads with AssetBundle.LoadFromFile (no embedded copy held in RAM)
 
         private const string BundleResourceName = "fireswayshrines";
         private const float SummaryPinWaitSeconds = 10f;
